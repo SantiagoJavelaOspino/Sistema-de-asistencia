@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- ESQUEMA DE BASE DE DATOS CANÓNICO — sena-attendance-system
 -- Compatible con SQLite (Local) y PostgreSQL (Producción)
 -- =============================================================================
@@ -52,6 +52,21 @@ CREATE TABLE IF NOT EXISTS enrollments (
   UNIQUE(unit_id, person_id)
 );
 
+CREATE TABLE IF NOT EXISTS instructor_assignments (
+  id TEXT PRIMARY KEY,
+  institution_id TEXT NOT NULL,
+  unit_id TEXT NOT NULL,
+  instructor_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(institution_id) REFERENCES institutions(id),
+  FOREIGN KEY(unit_id) REFERENCES academic_units(id),
+  FOREIGN KEY(instructor_id) REFERENCES people(id),
+  UNIQUE(unit_id, instructor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignments_instructor_unit
+ON instructor_assignments(instructor_id, unit_id);
+
 CREATE TABLE IF NOT EXISTS attendance_sessions (
   id TEXT PRIMARY KEY,
   institution_id TEXT,
@@ -69,6 +84,11 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
   ip_check_enabled INTEGER DEFAULT 1,
   evidence_submitted INTEGER DEFAULT 0,
   evidence_submitted_at TEXT,
+  evidence_file_name TEXT,
+  evidence_file_data TEXT,
+  evidence_mime_type TEXT,
+  evidence_file_size INTEGER,
+  evidence_hash TEXT,
   created_by TEXT,
   FOREIGN KEY(institution_id) REFERENCES institutions(id),
   FOREIGN KEY(unit_id) REFERENCES academic_units(id)

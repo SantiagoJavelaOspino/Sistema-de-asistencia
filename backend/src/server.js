@@ -54,7 +54,10 @@ import {
   getPublicFichas,
   registerStudent,
   getStudentActiveSession,
-  getAuditLogs
+  getAuditLogs,
+  assignInstructorUnits,
+  getInstructorUnits,
+  downloadSessionEvidence
 } from './controllers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -139,8 +142,8 @@ app.get('/api/sessions/:sessionId/absent',             authenticate, getAbsent);
 app.get('/api/sessions/:sessionId/rejections',         authenticate, getRejections);
 
 // Room & Manual Override
-app.post('/room/create',                               createRoom);
-app.post('/room/reopen',                               reopenRoom);
+app.post('/room/create',                               authenticate, createRoom);
+app.post('/room/reopen',                               authenticate, reopenRoom);
 app.post('/attendance/manual-override',                authenticate, manualOverride);
 app.post('/attendance/manual-checkin',                 authenticate, manualLateCheckin);
 app.get('/reports/session/:sessionId',                 authenticate, getSessionReport);
@@ -153,11 +156,12 @@ app.post('/api/excuses/submit',                        authenticate, submitExcus
 app.delete('/api/student/delete-account',              authenticate, deleteStudentAccount);
 app.post('/api/student/accept-terms',                  authenticate, acceptStudentTerms);
 
-// Instructor Excuses
+// Instructor Units & Excuses
+app.get('/api/instructor/my-units',                    authenticate, getInstructorUnits);
 app.get('/api/instructor/excuses',                     authenticate, getInstructorExcuses);
 app.post('/api/instructor/excuses/:id/resolve',        authenticate, resolveExcuse);
 
-// Instructor Late Requests
+// Instructor Late Requests & Evidence
 app.get('/api/instructor/late-requests',               authenticate, getInstructorLateRequests);
 app.post('/api/instructor/late-requests/:id/resolve',  authenticate, resolveLateRequest);
 app.post('/api/sessions/:sessionId/evidence',          authenticate, submitSessionEvidence);
@@ -170,6 +174,7 @@ app.post('/api/attendance/resolve-biometric/:recordId', authenticate, resolveBio
 app.get('/api/coord/instructors',                      authenticate, requireRole('COORDINADOR'), getCoordInstructors);
 app.post('/api/coord/instructors',                     authenticate, requireRole('COORDINADOR'), createInstructor);
 app.put('/api/coord/instructors/:id',                  authenticate, requireRole('COORDINADOR'), updateInstructor);
+app.post('/api/coord/instructors/:id/units',            authenticate, requireRole('COORDINADOR'), assignInstructorUnits);
 app.get('/api/coord/fichas',                           authenticate, requireRole('COORDINADOR'), getCoordFichas);
 app.post('/api/coord/fichas',                          authenticate, requireRole('COORDINADOR'), createFicha);
 app.put('/api/coord/fichas/:id',                       authenticate, requireRole('COORDINADOR'), updateFicha);
@@ -178,6 +183,7 @@ app.get('/api/coord/deletion-requests',                authenticate, requireRole
 app.post('/api/coord/deletion-requests/:requestId/approve', authenticate, requireRole('COORDINADOR'), approveFichaDeletion);
 app.post('/api/coord/deletion-requests/:requestId/reject',  authenticate, requireRole('COORDINADOR'), rejectFichaDeletion);
 app.get('/api/coord/evidences',                        authenticate, requireRole('COORDINADOR'), getCoordEvidences);
+app.get('/api/coord/evidences/:sessionId/download',    authenticate, downloadSessionEvidence);
 app.get('/api/coord/audit-logs',                        authenticate, requireRole('COORDINADOR'), getAuditLogs);
 
 // ── Error Handling ────────────────────────────────────────────────────────────

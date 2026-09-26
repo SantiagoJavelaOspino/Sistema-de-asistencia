@@ -171,6 +171,29 @@ export async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS instructor_assignments (
+      id TEXT PRIMARY KEY,
+      institution_id TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      instructor_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(institution_id) REFERENCES institutions(id),
+      FOREIGN KEY(unit_id) REFERENCES academic_units(id),
+      FOREIGN KEY(instructor_id) REFERENCES people(id),
+      UNIQUE(unit_id, instructor_id)
+    )
+  `);
+
+  try {
+    await run(`
+      CREATE INDEX IF NOT EXISTS idx_assignments_instructor_unit
+      ON instructor_assignments(instructor_id, unit_id)
+    `);
+  } catch (idxErr) {
+    console.warn('Notice: index on instructor_assignments:', idxErr.message);
+  }
+
+  await run(`
     CREATE TABLE IF NOT EXISTS attendance_sessions (
       id TEXT PRIMARY KEY,
       institution_id TEXT,
@@ -377,26 +400,33 @@ export async function initDb() {
 
   // Migration: Add evidence columns to attendance_sessions
   try {
+    const evidenceCols = [
+      { name: 'evidence_submitted', type: 'INTEGER DEFAULT 0' },
+      { name: 'evidence_submitted_at', type: 'TEXT' },
+      { name: 'evidence_file_name', type: 'TEXT' },
+      { name: 'evidence_file_data', type: 'TEXT' },
+      { name: 'evidence_mime_type', type: 'TEXT' },
+      { name: 'evidence_file_size', type: 'INTEGER' },
+      { name: 'evidence_hash', type: 'TEXT' }
+    ];
+
     if (isPostgres) {
-      try {
-        await run(`ALTER TABLE attendance_sessions ADD COLUMN evidence_submitted INTEGER DEFAULT 0`);
-      } catch (err) {
-        if (err.code !== '42701') throw err;
-      }
-      try {
-        await run(`ALTER TABLE attendance_sessions ADD COLUMN evidence_submitted_at TEXT`);
-      } catch (err) {
-        if (err.code !== '42701') throw err;
+      for (const col of evidenceCols) {
+        try {
+          await run(`ALTER TABLE attendance_sessions ADD COLUMN ${col.name} ${col.type}`);
+        } catch (err) {
+          if (err.code !== '42701') throw err;
+        }
       }
       console.log('Migration: Added evidence columns to attendance_sessions in Postgres');
     } else {
       const columns = await query(`PRAGMA table_info(attendance_sessions)`);
-      const hasEvidence = columns.some(col => col.name === 'evidence_submitted');
-      if (!hasEvidence) {
-        await run(`ALTER TABLE attendance_sessions ADD COLUMN evidence_submitted INTEGER DEFAULT 0`);
-        await run(`ALTER TABLE attendance_sessions ADD COLUMN evidence_submitted_at TEXT`);
-        console.log('Migration: Added evidence columns to attendance_sessions in SQLite');
+      for (const col of evidenceCols) {
+        if (!columns.some(c => c.name === col.name.split(' ')[0])) {
+          await run(`ALTER TABLE attendance_sessions ADD COLUMN ${col.name} ${col.type}`);
+        }
       }
+      console.log('Migration: Added evidence columns to attendance_sessions in SQLite');
     }
   } catch (migErr) {
     console.error('Migration error (non-fatal) attendance_sessions.evidence:', migErr.message);
@@ -662,6 +692,65 @@ export async function initDb() {
     console.log('Database Init: Student list cleaned successfully (Tomas Berserk kept).');
   } catch (err) {
     console.error('Database Init: Error cleaning students:', err.message);
+  }
+
+  // Seed default instructor assignments if none exist
+  try {
+    const assignCount = await get('SELECT COUNT(*) as count FROM instructor_assignments');
+    if (Number(assignCount?.count || 0) === 0) {
+      const instSena = await get("SELECT id FROM people WHERE documento = '1079606375'");
+      const instJesus = await get("SELECT id FROM people WHERE documento = '0000000001'");
+      const allUnits = await query("SELECT id, institution_id FROM academic_units WHERE active = 1");
+      
+      const nowStr = new Date().toISOString();
+      for (const u of allUnits) {
+        if (instSena) {
+          if (isPostgres) {
+            await run(`
+              INSERT INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (unit_id, instructor_id) DO NOTHING
+            `, [`asg_sena_${u.id}`, u.institution_id, u.id, instSena.id, nowStr]);
+          } else {
+            await run(`
+              INSERT OR IGNORE INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+              VALUES (?, ?, ?, ?, ?)
+            `, [`asg_sena_${u.id}`, u.institution_id, u.id, instSena.id, nowStr]);
+          }
+        }
+        if (instJesus) {
+          if (isPostgres) {
+            await run(`
+              INSERT INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (unit_id, instructor_id) DO NOTHING
+            `, [`asg_jesus_${u.id}`, u.institution_id, u.id, instJesus.id, nowStr]);
+          } else {
+            await run(`
+              INSERT OR IGNORE INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+              VALUES (?, ?, ?, ?, ?)
+            `, [`asg_jesus_${u.id}`, u.institution_id, u.id, instJesus.id, nowStr]);
+          }
+        }
+      }
+      console.log('Database Init: Seeded initial instructor_assignments.');
+    }
+  } catch (asgErr) {
+    console.error('Error seeding initial instructor_assignments:', asgErr.message);
+  }
+
+  // Reconcile historical sessions with 'INSTRUCTOR' or null created_by
+  try {
+    const defaultInst = await get("SELECT id FROM people WHERE documento = '1079606375'");
+    if (defaultInst) {
+      await run(`
+        UPDATE attendance_sessions 
+        SET created_by = ? 
+        WHERE created_by IS NULL OR created_by = 'INSTRUCTOR'
+      `, [defaultInst.id]);
+    }
+  } catch (recErr) {
+    console.error('Error reconciling historical session creators:', recErr.message);
   }
 }
 

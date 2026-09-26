@@ -7,6 +7,7 @@ import { runTokenRotationTests } from './token-rotation.test.js';
 import { runPunctualityTests } from './punctuality-hours.test.js';
 import { runGovernanceInvariantTests } from './invariants-governance.test.js';
 import { runDiscoveryFlowTests } from './e2e-discovery.test.js';
+import { runInstructorAssignmentTests } from './instructor-assignments.test.js';
 
 async function main() {
   console.log('====================================================');
@@ -22,6 +23,7 @@ async function main() {
     await runPunctualityTests();
     await runGovernanceInvariantTests();
     await runDiscoveryFlowTests();
+    await runInstructorAssignmentTests();
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log('\n====================================================');

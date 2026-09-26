@@ -1471,29 +1471,57 @@ window.promptManualCode = async (sessionId) => {
 // Load Fichas into dropdown
 async function loadFichas() {
   try {
-    // 1. Get SENA institution ID
-    const resInst = await fetch(`${state.apiUrl}/api/institutions`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    if (handleAuthError(resInst)) return;
+    const isInstructor = state.person && (state.person.roles.includes('INSTRUCTOR') || !state.person.roles.includes('COORDINATOR'));
+    let units = [];
 
-    const instData = await resInst.json();
-    if (!resInst.ok) throw new Error(instData.error.message);
+    if (isInstructor) {
+      const resUnits = await fetch(`${state.apiUrl}/api/instructor/my-units`, {
+        headers: { 'Authorization': `Bearer ${state.token}` }
+      });
+      if (handleAuthError(resUnits)) return;
+      const unitsData = await resUnits.json();
+      if (!resUnits.ok) throw new Error(unitsData.error?.message || 'Error cargando fichas');
+      units = unitsData.data || [];
+    } else {
+      // 1. Get SENA institution ID
+      const resInst = await fetch(`${state.apiUrl}/api/institutions`, {
+        headers: { 'Authorization': `Bearer ${state.token}` }
+      });
+      if (handleAuthError(resInst)) return;
 
-    const sena = instData.data.find(inst => inst.code === 'SENA');
-    if (!sena) throw new Error('No se encontró institución SENA.');
+      const instData = await resInst.json();
+      if (!resInst.ok) throw new Error(instData.error.message);
 
-    // 2. Load units (Fichas)
-    const resUnits = await fetch(`${state.apiUrl}/api/institutions/${sena.id}/units`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    if (handleAuthError(resUnits)) return;
+      const sena = instData.data.find(inst => inst.code === 'SENA');
+      if (!sena) throw new Error('No se encontró institución SENA.');
 
-    const unitsData = await resUnits.json();
-    if (!resUnits.ok) throw new Error(unitsData.error.message);
+      // 2. Load units (Fichas)
+      const resUnits = await fetch(`${state.apiUrl}/api/institutions/${sena.id}/units`, {
+        headers: { 'Authorization': `Bearer ${state.token}` }
+      });
+      if (handleAuthError(resUnits)) return;
+
+      const unitsData = await resUnits.json();
+      if (!resUnits.ok) throw new Error(unitsData.error.message);
+      units = unitsData.data || [];
+    }
+
+    if (!units || units.length === 0) {
+      selectFicha.innerHTML = '<option value="">⚠️ Sin fichas asignadas (Contacte al Coordinador)</option>';
+      if (btnCreateRoom) {
+        btnCreateRoom.disabled = true;
+        btnCreateRoom.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+      return;
+    }
+
+    if (btnCreateRoom) {
+      btnCreateRoom.disabled = false;
+      btnCreateRoom.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
 
     selectFicha.innerHTML = '<option value="">-- Seleccione una Ficha --</option>';
-    unitsData.data.forEach(unit => {
+    units.forEach(unit => {
       selectFicha.innerHTML += `<option value="${unit.id}">${unit.code} - ${unit.name}</option>`;
     });
 
@@ -2092,22 +2120,16 @@ async function fetchReportData() {
       btnPdf.classList.remove('opacity-50', 'pointer-events-none');
       warning.classList.add('hidden');
 
-      // Condition: ONLY enable official evidence submission if session is reopened (both entry and exit rooms created)
-      const isReopened = state.activeSession.is_reopened === 1;
-      if (isReopened) {
-        // Check if evidence is already submitted
-        if (state.activeSession.evidence_submitted === 1) {
-          btnEvidence.classList.add('pointer-events-none');
-          btnEvidence.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'opacity-50');
-          btnEvidence.classList.add('bg-teal-600');
-          btnEvidence.querySelector('span').textContent = 'Evidencia Entregada ✓';
-        } else {
-          btnEvidence.classList.remove('opacity-50', 'pointer-events-none', 'bg-teal-600');
-          btnEvidence.classList.add('bg-blue-600', 'hover:bg-blue-700');
-          btnEvidence.querySelector('span').textContent = 'Entregar Evidencia';
-        }
+      // Condition: Enable official evidence submission unconditionally once the session is loaded
+      if (state.activeSession.evidence_submitted === 1) {
+        btnEvidence.classList.add('pointer-events-none');
+        btnEvidence.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'opacity-50');
+        btnEvidence.classList.add('bg-teal-600');
+        btnEvidence.querySelector('span').textContent = 'Evidencia Entregada ✓';
       } else {
-        btnEvidence.classList.add('opacity-50', 'pointer-events-none');
+        btnEvidence.classList.remove('opacity-50', 'pointer-events-none', 'bg-teal-600');
+        btnEvidence.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        btnEvidence.querySelector('span').textContent = 'Entregar Evidencia';
       }
     }
   } catch (err) {
@@ -2127,6 +2149,20 @@ function renderReportGrid(data) {
     if (r.porcentaje_asistencia >= 80) pctBadge = 'bg-green-500/10 text-green-400 border border-green-500/20';
     else if (r.porcentaje_asistencia > 0) pctBadge = 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
 
+    let estadoBadge = 'bg-slate-700/50 text-slate-300';
+    const estado = r.estado_llegada || r.tipo_registro || 'Inasistencia';
+    if (estado === 'Temprano') {
+      estadoBadge = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+    } else if (estado === 'Tarde') {
+      estadoBadge = 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+    } else if (estado === 'Excusado') {
+      estadoBadge = 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
+    } else if (estado === 'Excusa Pendiente') {
+      estadoBadge = 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
+    } else if (estado === 'Inasistencia' || estado === 'FALLA_TOTAL') {
+      estadoBadge = 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
+    }
+
     reportGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
         <td class="py-3.5 px-4 font-medium text-slate-200">${r.nombre}</td>
@@ -2136,8 +2172,10 @@ function renderReportGrid(data) {
         <td class="py-3.5 px-4 text-center">
           <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-bold font-mono ${pctBadge}">${r.porcentaje_asistencia}%</span>
         </td>
-        <td class="py-3.5 px-4 text-slate-400 font-mono text-xs">${r.tipo_registro}</td>
-        <td class="py-3.5 px-4 text-slate-400 font-mono text-xs">${r.hora_ingreso} / ${r.hora_salida}</td>
+        <td class="py-3.5 px-4 text-slate-300 font-mono text-xs">${r.hora_ingreso || '-'}</td>
+        <td class="py-3.5 px-4 text-center">
+          <span class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${estadoBadge}">${estado}</span>
+        </td>
       </tr>
     `;
   });
@@ -2151,16 +2189,15 @@ btnPrintReport.addEventListener('click', () => {
   }
 
   try {
-    // Map JSON to Spanish Columns
+    // Map JSON to Spanish Columns (Hora de Entrada only)
     const excelRows = state.lastReportData.map(r => ({
       'Aprendiz': r.nombre,
       'Documento': r.documento,
       'Horas Programadas': r.horas_programadas,
       'Horas Asistidas': r.horas_asistidas,
       '% Asistencia': r.porcentaje_asistencia + '%',
-      'Tipo de Registro': r.tipo_registro,
-      'Hora Ingreso': r.hora_ingreso,
-      'Hora Salida': r.hora_salida
+      'Hora de Entrada': r.hora_ingreso || '-',
+      'Puntualidad / Estado': r.estado_llegada || r.tipo_registro || 'Inasistencia'
     }));
 
     // Create Excel book and sheet
@@ -2232,7 +2269,7 @@ btnDownloadPdfReport.addEventListener('click', () => {
       : 'No disponible';
     doc.text(dateStr, 60, 60);
 
-    // Map table rows
+    // Map table rows (Without Hora Salida)
     const tableRows = state.lastReportData.map((r, index) => [
       index + 1,
       r.nombre,
@@ -2240,14 +2277,14 @@ btnDownloadPdfReport.addEventListener('click', () => {
       `${r.horas_programadas}h`,
       `${r.horas_asistidas}h`,
       `${r.porcentaje_asistencia}%`,
-      r.tipo_registro,
-      r.hora_ingreso && r.hora_ingreso !== '-' ? `${r.hora_ingreso} / ${r.hora_salida || '-'}` : 'FALLA_TOTAL'
+      r.hora_ingreso || '-',
+      r.estado_llegada || r.tipo_registro || 'Inasistencia'
     ]);
 
     // Draw AutoTable
     doc.autoTable({
       startY: 72,
-      head: [['#', 'Aprendiz', 'Documento', 'Prog.', 'Asist.', '% Jornada', 'Estado', 'Entrada / Salida']],
+      head: [['#', 'Aprendiz', 'Documento', 'Prog.', 'Asist.', '% Jornada', 'Hora Entrada', 'Estado']],
       body: tableRows,
       theme: 'grid',
       headStyles: {
@@ -2264,7 +2301,9 @@ btnDownloadPdfReport.addEventListener('click', () => {
         0: { width: 8 },
         3: { halign: 'center' },
         4: { halign: 'center' },
-        5: { halign: 'center' }
+        5: { halign: 'center' },
+        6: { halign: 'center' },
+        7: { halign: 'center' }
       },
       margin: { left: 14, right: 14 }
     });
@@ -2292,33 +2331,89 @@ btnDownloadPdfReport.addEventListener('click', () => {
   }
 });
 
-// Submit session evidence (Instructor)
-btnSubmitEvidence.addEventListener('click', async () => {
+// Submit session evidence (Instructor via Native File Explorer)
+btnSubmitEvidence.addEventListener('click', () => {
   if (!state.activeSession) return;
-  if (!confirm('¿Estás seguro de que deseas enviar este reporte de asistencia como evidencia oficial al Coordinador? Esta acción no se puede deshacer.')) return;
-
-  try {
-    const res = await fetch(`${state.apiUrl}/api/sessions/${state.activeSession.id}/evidence`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
-      }
-    });
-    if (handleAuthError(res)) return;
-
-    const result = await res.json();
-    if (res.ok) {
-      alert('¡Evidencia entregada al Coordinador con éxito!');
-      state.activeSession.evidence_submitted = 1;
-      fetchReportData();
-    } else {
-      alert(`Error: ${result.error.message}`);
-    }
-  } catch (err) {
-    alert('Error de red al entregar la evidencia.');
+  if (state.activeSession.evidence_submitted === 1) {
+    alert('La evidencia de esta jornada ya ha sido entregada.');
+    return;
+  }
+  const fileInput = document.getElementById('evidenceFileInput');
+  if (fileInput) {
+    fileInput.click();
   }
 });
+
+const evidenceFileInput = document.getElementById('evidenceFileInput');
+if (evidenceFileInput) {
+  evidenceFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file || !state.activeSession) return;
+
+    // Validate size (max 10MB)
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert(`El archivo supera el tamaño máximo permitido de 10 MB (${(file.size / (1024 * 1024)).toFixed(2)} MB).`);
+      evidenceFileInput.value = '';
+      return;
+    }
+
+    // Validate extension (.xlsx, .xls, .pdf)
+    const allowedExts = ['.xlsx', '.xls', '.pdf'];
+    const fileNameLower = file.name.toLowerCase();
+    const isAllowed = allowedExts.some(ext => fileNameLower.endsWith(ext));
+    if (!isAllowed) {
+      alert('Formato no permitido. Solo se aceptan archivos de tipo Excel (.xlsx, .xls) o PDF (.pdf).');
+      evidenceFileInput.value = '';
+      return;
+    }
+
+    const confirmMsg = `¿Deseas adjuntar y entregar el archivo "${file.name}" (${(file.size / 1024).toFixed(1)} KB) como evidencia oficial al Coordinador? Esta acción no se puede deshacer.`;
+    if (!confirm(confirmMsg)) {
+      evidenceFileInput.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const fileData = reader.result; // DataURL (Base64)
+        const res = await fetch(`${state.apiUrl}/api/sessions/${state.activeSession.id}/evidence`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${state.token}`
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileData,
+            fileSize: file.size,
+            mimeType: file.type || 'application/octet-stream'
+          })
+        });
+        if (handleAuthError(res)) return;
+
+        const result = await res.json();
+        if (res.ok) {
+          alert('¡Evidencia adjuntada y radicada ante Coordinación con éxito!');
+          state.activeSession.evidence_submitted = 1;
+          fetchReportData();
+        } else {
+          alert(`Error al entregar evidencia: ${result.error?.message || 'Error desconocido'}`);
+        }
+      } catch (err) {
+        alert('Error de red al subir la evidencia.');
+      } finally {
+        evidenceFileInput.value = '';
+      }
+    };
+    reader.onerror = () => {
+      alert('Error al leer el archivo seleccionado.');
+      evidenceFileInput.value = '';
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 // Create new session flow
 btnNewRoom.addEventListener('click', () => {
@@ -2695,7 +2790,8 @@ async function handleDeleteStudentAccount() {
 // --- INSTRUCTOR EXCUSES LOGIC ---
 async function fetchInstructorExcuses() {
   try {
-    const res = await fetch(`${state.apiUrl}/api/instructor/excuses`, {
+    const unitQuery = state.activeSession?.unit_id ? `?unitId=${encodeURIComponent(state.activeSession.unit_id)}` : '';
+    const res = await fetch(`${state.apiUrl}/api/instructor/excuses${unitQuery}`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
     if (handleAuthError(res)) return;
@@ -2997,7 +3093,7 @@ btnBulkMarkPresent.addEventListener('click', async () => {
 // ── COORDINATOR FUNCTIONS ─────────────────────────────────────────────────────
 
 async function fetchCoordInstructors() {
-  coordInstructorsGridBody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-500">Cargando instructores...</td></tr>';
+  coordInstructorsGridBody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">Cargando instructores...</td></tr>';
   try {
     const res = await fetch(`${state.apiUrl}/api/coord/instructors`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
@@ -3006,19 +3102,20 @@ async function fetchCoordInstructors() {
 
     const result = await res.json();
     if (res.ok) {
+      state.coordInstructorsList = result.data || [];
       renderCoordInstructors(result.data);
     } else {
-      coordInstructorsGridBody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-red-400">Error: ${result.error.message}</td></tr>`;
+      coordInstructorsGridBody.innerHTML = `<tr><td colspan="5" class="text-center py-8 text-red-400">Error: ${result.error.message}</td></tr>`;
     }
   } catch (err) {
-    coordInstructorsGridBody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-red-400">Error de conexión.</td></tr>';
+    coordInstructorsGridBody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-400">Error de conexión.</td></tr>';
   }
 }
 
 function renderCoordInstructors(instructors) {
   coordInstructorsGridBody.innerHTML = '';
   if (!instructors || instructors.length === 0) {
-    coordInstructorsGridBody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-500">No hay instructores registrados.</td></tr>';
+    coordInstructorsGridBody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No hay instructores registrados.</td></tr>';
     return;
   }
 
@@ -3029,23 +3126,154 @@ function renderCoordInstructors(instructors) {
 
     const toggleText = inst.active ? 'Desactivar' : 'Activar';
 
+    let fichasBadges = '<span class="text-xs text-slate-500 italic">Sin fichas</span>';
+    if (inst.assigned_units && inst.assigned_units.length > 0) {
+      fichasBadges = `
+        <div class="flex flex-wrap gap-1 max-w-xs">
+          ${inst.assigned_units.map(u => `<span class="inline-flex px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-[#39A900]/15 text-[#39A900] border border-[#39A900]/25" title="${u.name || ''}">${u.code}</span>`).join('')}
+        </div>
+      `;
+    }
+
     coordInstructorsGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
         <td class="py-3 px-4 font-semibold text-slate-200">${inst.nombre}</td>
         <td class="py-3 px-4 font-mono text-slate-400">${inst.documento}</td>
+        <td class="py-3 px-4">${fichasBadges}</td>
         <td class="py-3 px-4">${statusText}</td>
         <td class="py-3 px-4 text-right">
-          <div class="flex justify-end gap-2">
-            <button onclick="editInstructor('${inst.id}', '${inst.nombre}', '${inst.documento}', ${inst.active})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md transition-all">
+          <div class="flex justify-end gap-1.5 flex-wrap">
+            <button onclick="window.openAssignFichasModal('${inst.id}', '${inst.nombre.replace(/'/g, "\\'")}')" class="text-xs bg-[#39A900]/15 border border-[#39A900]/30 hover:bg-[#39A900]/25 text-[#39A900] px-2.5 py-1 rounded-md transition-all font-semibold">
+              Asignar Fichas
+            </button>
+            <button onclick="editInstructor('${inst.id}', '${inst.nombre.replace(/'/g, "\\'")}', '${inst.documento}', ${inst.active})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md transition-all">
               Editar
             </button>
-            <button onclick="toggleInstructorActive('${inst.id}', '${inst.nombre}', ${inst.active})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-red-400 px-2.5 py-1 rounded-md transition-all">
+            <button onclick="toggleInstructorActive('${inst.id}', '${inst.nombre.replace(/'/g, "\\'")}', ${inst.active})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-red-400 px-2.5 py-1 rounded-md transition-all">
               ${toggleText}
             </button>
           </div>
         </td>
       </tr>
     `;
+  });
+}
+
+// --- MODAL ASIGNAR FICHAS A INSTRUCTOR ---
+window.openAssignFichasModal = async (instructorId, instructorName) => {
+  const modal = document.getElementById('assignFichasModal');
+  const title = document.getElementById('assignFichasModalTitle');
+  const listEl = document.getElementById('assignFichasList');
+  const inputId = document.getElementById('assignInstructorId');
+  const countEl = document.getElementById('assignFichasCount');
+
+  if (!modal || !listEl) return;
+
+  inputId.value = instructorId;
+  title.textContent = `Asignar Fichas: ${instructorName}`;
+  listEl.innerHTML = '<div class="text-center py-6 text-slate-500 text-xs">Cargando fichas del centro...</div>';
+  modal.classList.remove('hidden');
+
+  try {
+    // 1. Fetch all fichas
+    const resFichas = await fetch(`${state.apiUrl}/api/coord/fichas`, {
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+    const fichasData = await resFichas.json();
+    const allFichas = fichasData.data || [];
+
+    // 2. Find instructor in cached list or fetch current assignments
+    const inst = (state.coordInstructorsList || []).find(i => i.id === instructorId);
+    const assignedIds = new Set((inst?.assigned_units || []).map(u => u.id));
+
+    if (allFichas.length === 0) {
+      listEl.innerHTML = '<div class="text-center py-6 text-slate-500 text-xs">No hay fichas registradas en el centro.</div>';
+      if (countEl) countEl.textContent = '0 seleccionadas';
+      return;
+    }
+
+    const updateCount = () => {
+      const checkedCount = listEl.querySelectorAll('.ficha-assign-cb:checked').length;
+      if (countEl) countEl.textContent = `${checkedCount} seleccionada${checkedCount === 1 ? '' : 's'}`;
+    };
+
+    listEl.innerHTML = allFichas.map(f => {
+      const isChecked = assignedIds.has(f.id);
+      return `
+        <label class="flex items-center gap-3 p-3 rounded-2xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-slate-700 cursor-pointer transition-all">
+          <input type="checkbox" value="${f.id}" class="ficha-assign-cb rounded bg-slate-800 border-slate-700 text-[#39A900] focus:ring-[#39A900] w-4 h-4 cursor-pointer" ${isChecked ? 'checked' : ''}>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold font-mono text-white">${f.code}</span>
+              <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${f.active ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}">${f.jornada || 'DIURNA'}</span>
+            </div>
+            <div class="text-[11px] text-slate-400 truncate mt-0.5">${f.name}</div>
+          </div>
+        </label>
+      `;
+    }).join('');
+
+    updateCount();
+    listEl.querySelectorAll('.ficha-assign-cb').forEach(cb => {
+      cb.addEventListener('change', updateCount);
+    });
+
+  } catch (err) {
+    listEl.innerHTML = '<div class="text-center py-6 text-red-400 text-xs">Error al cargar las fichas disponibles.</div>';
+  }
+};
+
+const btnCloseAssignFichasModal = document.getElementById('btnCloseAssignFichasModal');
+const btnCancelAssignFichas = document.getElementById('btnCancelAssignFichas');
+const btnSaveAssignFichas = document.getElementById('btnSaveAssignFichas');
+const assignFichasModal = document.getElementById('assignFichasModal');
+
+const closeAssignModal = () => {
+  if (assignFichasModal) assignFichasModal.classList.add('hidden');
+};
+
+if (btnCloseAssignFichasModal) btnCloseAssignFichasModal.addEventListener('click', closeAssignModal);
+if (btnCancelAssignFichas) btnCancelAssignFichas.addEventListener('click', closeAssignModal);
+
+if (btnSaveAssignFichas) {
+  btnSaveAssignFichas.addEventListener('click', async () => {
+    const inputId = document.getElementById('assignInstructorId');
+    const instructorId = inputId ? inputId.value : null;
+    if (!instructorId) return;
+
+    const listEl = document.getElementById('assignFichasList');
+    const checked = Array.from(listEl.querySelectorAll('.ficha-assign-cb:checked')).map(cb => cb.value);
+
+    btnSaveAssignFichas.disabled = true;
+    const btnSpan = btnSaveAssignFichas.querySelector('span');
+    const origText = btnSpan ? btnSpan.textContent : '';
+    if (btnSpan) btnSpan.textContent = 'Guardando...';
+
+    try {
+      const res = await fetch(`${state.apiUrl}/api/coord/instructors/${instructorId}/units`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ unitIds: checked })
+      });
+      if (handleAuthError(res)) return;
+
+      const result = await res.json();
+      if (res.ok) {
+        alert(result.data?.message || 'Fichas asignadas correctamente al instructor.');
+        closeAssignModal();
+        fetchCoordInstructors();
+      } else {
+        alert(`Error: ${result.error?.message || 'No se pudieron asignar las fichas'}`);
+      }
+    } catch (err) {
+      alert('Error de red al guardar las asignaciones.');
+    } finally {
+      btnSaveAssignFichas.disabled = false;
+      if (btnSpan) btnSpan.textContent = origText || 'Guardar Asignaciones';
+    }
   });
 }
 
@@ -3329,15 +3557,33 @@ function renderCoordEvidences(evidences) {
     const evText = ev.evidence_submitted === 1 ? 'Entregada ✓' : 'Pendiente';
     const evClass = ev.evidence_submitted === 1 ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20 font-bold' : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
 
-    // Download button is only active if session is closed/has records
+    // Evidence file download button if submitted
+    let downloadAttachedBtn = '';
+    if (ev.evidence_submitted === 1) {
+      downloadAttachedBtn = `
+        <a 
+          href="${state.apiUrl}/api/coord/evidences/${ev.id}/download"
+          target="_blank"
+          class="px-2.5 py-1 bg-teal-600/20 hover:bg-teal-600/30 text-teal-400 border border-teal-500/30 active:scale-95 text-xs font-bold rounded-lg transition-all inline-flex items-center gap-1"
+          title="Descargar archivo de evidencia oficial entregado por el instructor"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+          <span>Evidencia Adjunta</span>
+        </a>
+      `;
+    }
+
     const downloadBtn = `
-      <button 
-        onclick="window.downloadCoordExcelReport('${ev.id}', '${ev.ficha_code}')"
-        class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs font-bold rounded-lg text-slate-200 hover:text-white transition-all inline-flex items-center gap-1 border border-slate-700/60"
-      >
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-        <span>Reporte Excel</span>
-      </button>
+      <div class="flex items-center justify-end gap-1.5 flex-wrap">
+        ${downloadAttachedBtn}
+        <button 
+          onclick="window.downloadCoordExcelReport('${ev.id}', '${ev.ficha_code}')"
+          class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs font-bold rounded-lg text-slate-200 hover:text-white transition-all inline-flex items-center gap-1 border border-slate-700/60"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          <span>Reporte Excel</span>
+        </button>
+      </div>
     `;
 
     coordEvidencesGridBody.innerHTML += `
@@ -3378,16 +3624,15 @@ window.downloadCoordExcelReport = async (sessionId, fichaCode) => {
       return;
     }
 
-    // Map to Spanish columns
+    // Map to Spanish columns (Without Hora Salida)
     const excelRows = reportData.map(r => ({
       'Aprendiz': r.nombre,
       'Documento': r.documento,
       'Horas Programadas': r.horas_programadas,
       'Horas Asistidas': r.horas_asistidas,
       '% Asistencia': r.porcentaje_asistencia + '%',
-      'Tipo de Registro': r.tipo_registro,
-      'Hora Ingreso': r.hora_ingreso,
-      'Hora Salida': r.hora_salida
+      'Hora de Entrada': r.hora_ingreso || '-',
+      'Puntualidad / Estado': r.estado_llegada || r.tipo_registro || 'Inasistencia'
     }));
 
     // Generate Excel

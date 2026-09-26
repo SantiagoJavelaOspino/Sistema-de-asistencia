@@ -2,6 +2,7 @@ import { run, get, query, createAuditLog } from './db.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import path from 'path';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev-only';
 
@@ -22,11 +23,11 @@ export const sanitizeDocument = (doc) => {
 
 // Helper to get client IP
 const getClientIp = (req) => {
-  const xForwardedFor = req.headers['x-forwarded-for'];
+  const xForwardedFor = req.headers && req.headers['x-forwarded-for'];
   if (xForwardedFor) {
     return xForwardedFor.split(',')[0].trim();
   }
-  return req.socket.remoteAddress || req.ip;
+  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
 };
 
 // QR Token generator based on 60-second blocks
@@ -227,6 +228,24 @@ export const createRoom = async (req, res) => {
       return res.status(400).json({ error: { code: 'UNIT_INSTITUTION_MISMATCH', message: 'Ficha no pertenece a la institución.' } });
     }
 
+    // Check instructor assignment: if user is instructor (and not coordinator), must be assigned to unitId
+    const userRoles = req.user?.roles || [];
+    const isInstructor = userRoles.includes('INSTRUCTOR') && !userRoles.includes('COORDINADOR');
+    if (isInstructor && req.user?.id) {
+      const assignment = await get(
+        'SELECT id FROM instructor_assignments WHERE instructor_id = ? AND unit_id = ? AND institution_id = ?',
+        [req.user.id, unitId, institutionId]
+      );
+      if (!assignment) {
+        return res.status(403).json({
+          error: {
+            code: 'INSTRUCTOR_NOT_ASSIGNED',
+            message: 'No estás asignado a esta ficha. No puedes abrir clase.'
+          }
+        });
+      }
+    }
+
     const countPeople = await get(`
       SELECT COUNT(*) as count FROM enrollments WHERE unit_id = ? AND active = 1
     `, [unitId]);
@@ -262,7 +281,7 @@ export const createRoom = async (req, res) => {
     await createAuditLog(req.user?.id, 'CREATE_ROOM', 'session', sessionId, null, { validation_mode: finalMode, unitId }, { creatorIp });
 
     const createdSession = await get('SELECT * FROM attendance_sessions WHERE id = ?', [sessionId]);
-    res.status(201).json({ data: createdSession });
+    res.status(201).json({ ok: true, data: createdSession });
   } catch (err) {
     console.error('Error creating room:', err);
     res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
@@ -869,12 +888,27 @@ export const getSessionReport = async (req, res) => {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
 
-    // Get all enrolled people
+    // Resource Authorization
+    const userRoles = req.user?.roles || [];
+    const isCoord = userRoles.includes('COORDINADOR');
+    if (!isCoord && req.user?.id) {
+      const isCreator = session.created_by === req.user.id;
+      const isAssigned = await get(
+        'SELECT id FROM instructor_assignments WHERE instructor_id = ? AND unit_id = ?',
+        [req.user.id, session.unit_id]
+      );
+      if (!isCreator && !isAssigned) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'No tienes autorización para acceder al reporte de esta sesión.' } });
+      }
+    }
+
+    // Get all enrolled people for this session's unit
     const enrolled = await query(`
       SELECT p.id, p.documento, p.nombre
       FROM people p
       JOIN enrollments e ON p.id = e.person_id
       WHERE e.unit_id = ? AND e.active = 1 AND p.active = 1
+      ORDER BY p.nombre ASC
     `, [session.unit_id]);
 
     // Get all records for this session
@@ -883,21 +917,56 @@ export const getSessionReport = async (req, res) => {
     `, [sessionId]);
 
     const recordMap = new Map(records.map(r => [r.person_id, r]));
+
+    // Get all excuses for this session
+    const sessionExcuses = await query(`
+      SELECT person_id, status FROM excuses WHERE session_id = ?
+    `, [sessionId]);
+    const excuseMap = new Map(sessionExcuses.map(ex => [ex.person_id, ex]));
+
     const horasProgramadas = 6;
 
     const report = enrolled.map(p => {
       const rec = recordMap.get(p.id);
+      const excuse = excuseMap.get(p.id);
       
       let horasAsistidas = 0;
       let horasFalla = horasProgramadas;
       let tipoRegistro = 'FALLA_TOTAL';
       let porcentajeAsistencia = 0.0;
+      let estadoLlegada = 'Inasistencia';
+      let horaIngreso = '-';
 
-      if (rec) {
+      if (excuse && excuse.status === 'approved') {
+        horasAsistidas = horasProgramadas;
+        horasFalla = 0;
+        tipoRegistro = 'EXCUSA_APROBADA';
+        porcentajeAsistencia = 100.0;
+        estadoLlegada = 'Excusado';
+        horaIngreso = rec ? rec.hora_ingreso_real : '-';
+      } else if (excuse && excuse.status === 'pending') {
+        estadoLlegada = 'Excusa Pendiente';
+        if (rec) {
+          horasAsistidas = rec.horas_validadas_asistencia;
+          horasFalla = rec.horas_inasistencia_acumulada;
+          tipoRegistro = rec.tipo_registro;
+          porcentajeAsistencia = parseFloat(((horasAsistidas / horasProgramadas) * 100).toFixed(2));
+          horaIngreso = rec.hora_ingreso_real;
+        }
+      } else if (rec) {
         horasAsistidas = rec.horas_validadas_asistencia;
         horasFalla = rec.horas_inasistencia_acumulada;
         tipoRegistro = rec.tipo_registro;
         porcentajeAsistencia = parseFloat(((horasAsistidas / horasProgramadas) * 100).toFixed(2));
+        horaIngreso = rec.hora_ingreso_real;
+
+        if (tipoRegistro === 'REGULAR' || (rec.status === 'PRESENTE' && !tipoRegistro.includes('RETARDO'))) {
+          estadoLlegada = 'Temprano';
+        } else if (tipoRegistro.includes('RETARDO') || tipoRegistro === 'MANUAL_LATE' || rec.status === 'ASISTENCIA_PARCIAL') {
+          estadoLlegada = 'Tarde';
+        } else {
+          estadoLlegada = 'Temprano';
+        }
       }
 
       return {
@@ -908,7 +977,8 @@ export const getSessionReport = async (req, res) => {
         horas_falla: horasFalla,
         porcentaje_asistencia: porcentajeAsistencia,
         tipo_registro: tipoRegistro,
-        hora_ingreso: rec ? rec.hora_ingreso_real : '-',
+        estado_llegada: estadoLlegada,
+        hora_ingreso: horaIngreso,
         hora_salida: rec ? (rec.hora_salida_real || '-') : '-'
       };
     });
@@ -1067,7 +1137,12 @@ export const submitExcuse = async (req, res) => {
 // Get Instructor Excuses List
 export const getInstructorExcuses = async (req, res) => {
   try {
-    const rows = await query(`
+    const userRoles = req.user?.roles || [];
+    const isCoord = userRoles.includes('COORDINADOR');
+    const { unitId } = req.query;
+    const institutionId = req.user?.institutionId;
+
+    let sql = `
       SELECT e.id, e.session_id, e.person_id, e.text, e.file_name, e.file_data, e.status, e.created_at,
              p.nombre as student_name, p.documento as student_doc,
              COALESCE(s.room_created_at, s.activated_at) as room_created_at,
@@ -1076,8 +1151,31 @@ export const getInstructorExcuses = async (req, res) => {
       JOIN people p ON e.person_id = p.id
       JOIN attendance_sessions s ON e.session_id = s.id
       JOIN academic_units u ON s.unit_id = u.id
-      ORDER BY e.created_at DESC
-    `);
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (institutionId) {
+      sql += ' AND s.institution_id = ?';
+      params.push(institutionId);
+    }
+
+    if (!isCoord && req.user?.id) {
+      sql += ` AND (
+        s.unit_id IN (SELECT unit_id FROM instructor_assignments WHERE instructor_id = ?)
+        OR s.created_by = ?
+      )`;
+      params.push(req.user.id, req.user.id);
+    }
+
+    if (unitId) {
+      sql += ' AND s.unit_id = ?';
+      params.push(unitId);
+    }
+
+    sql += ' ORDER BY e.created_at DESC';
+
+    const rows = await query(sql, params);
     res.json({ data: rows });
   } catch (err) {
     res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
@@ -1452,13 +1550,151 @@ export const resolveLateRequest = async (req, res) => {
 export const getCoordInstructors = async (req, res) => {
   try {
     const institutionId = req.user.institutionId;
-    const rows = await query(
+    const instructors = await query(
       `SELECT id, documento, nombre, active, roles FROM people 
        WHERE institution_id = ? AND roles LIKE '%INSTRUCTOR%'
        ORDER BY nombre ASC`,
       [institutionId]
     );
-    res.json({ data: rows });
+
+    // Fetch all assignments for these instructors in this institution
+    const assignments = await query(
+      `SELECT ia.instructor_id, u.id as unit_id, u.code as unit_code, u.name as unit_name
+       FROM instructor_assignments ia
+       JOIN academic_units u ON ia.unit_id = u.id
+       WHERE ia.institution_id = ? AND u.active = 1
+       ORDER BY u.code ASC`,
+      [institutionId]
+    );
+
+    const assignMap = new Map();
+    for (const a of assignments) {
+      if (!assignMap.has(a.instructor_id)) {
+        assignMap.set(a.instructor_id, []);
+      }
+      assignMap.get(a.instructor_id).push({
+        id: a.unit_id,
+        code: a.unit_code,
+        name: a.unit_name
+      });
+    }
+
+    const data = instructors.map(inst => ({
+      ...inst,
+      assigned_units: assignMap.get(inst.id) || []
+    }));
+
+    res.json({ data });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+};
+
+export const getInstructorUnits = async (req, res) => {
+  try {
+    const instructorId = req.user.id;
+    const institutionId = req.user.institutionId;
+
+    const units = await query(`
+      SELECT u.id, u.code, u.name, u.jornada, u.modalidad
+      FROM academic_units u
+      JOIN instructor_assignments ia ON u.id = ia.unit_id
+      WHERE ia.instructor_id = ? AND ia.institution_id = ? AND u.active = 1
+      ORDER BY u.code ASC
+    `, [instructorId, institutionId]);
+
+    res.json({ data: units });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+};
+
+export const assignInstructorUnits = async (req, res) => {
+  try {
+    const { id } = req.params; // instructor id
+    const { unitIds } = req.body; // array of unit ids
+    const institutionId = req.user.institutionId;
+
+    if (!Array.isArray(unitIds)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'unitIds debe ser un arreglo de identificadores de ficha.' } });
+    }
+
+    // 1. Verify instructor exists in this institution and has role INSTRUCTOR
+    const instructor = await get(
+      'SELECT id, nombre, documento, roles, institution_id FROM people WHERE id = ? AND institution_id = ?',
+      [id, institutionId]
+    );
+    if (!instructor) {
+      return res.status(404).json({ error: { code: 'INSTRUCTOR_NOT_FOUND', message: 'Instructor no encontrado en esta institución.' } });
+    }
+    const roles = typeof instructor.roles === 'string' ? JSON.parse(instructor.roles || '[]') : (instructor.roles || []);
+    if (!roles.includes('INSTRUCTOR')) {
+      return res.status(400).json({ error: { code: 'INVALID_ROLE', message: 'La persona seleccionada no tiene el rol de INSTRUCTOR.' } });
+    }
+
+    // 2. Verify all unitIds exist in this institution and are active
+    if (unitIds.length > 0) {
+      const validUnits = await query(
+        `SELECT id FROM academic_units WHERE institution_id = ? AND active = 1`,
+        [institutionId]
+      );
+      const validUnitSet = new Set(validUnits.map(u => u.id));
+      for (const uId of unitIds) {
+        if (!validUnitSet.has(uId)) {
+          return res.status(400).json({
+            error: { code: 'INVALID_UNIT', message: `La ficha con ID ${uId} no existe, no está activa o pertenece a otra institución.` }
+          });
+        }
+      }
+    }
+
+    // Get previous assignments for audit log
+    const prevAssignments = await query(
+      'SELECT unit_id FROM instructor_assignments WHERE instructor_id = ? AND institution_id = ?',
+      [id, institutionId]
+    );
+    const prevUnitIds = prevAssignments.map(a => a.unit_id);
+
+    // 3. Atomically replace assignments
+    await run('DELETE FROM instructor_assignments WHERE instructor_id = ? AND institution_id = ?', [id, institutionId]);
+
+    const now = new Date().toISOString();
+    for (const uId of unitIds) {
+      const asgId = `asg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      await run(`
+        INSERT INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `, [asgId, institutionId, uId, id, now]);
+    }
+
+    // 4. Audit log
+    await createAuditLog(
+      req.user.id,
+      'ASSIGN_INSTRUCTOR_UNITS',
+      'person',
+      id,
+      { assigned_units: prevUnitIds },
+      { assigned_units: unitIds },
+      { instructor_nombre: instructor.nombre, instructor_doc: instructor.documento }
+    );
+
+    // Retrieve updated assigned units
+    const updatedAssignments = await query(`
+      SELECT u.id, u.code, u.name
+      FROM instructor_assignments ia
+      JOIN academic_units u ON ia.unit_id = u.id
+      WHERE ia.instructor_id = ? AND ia.institution_id = ?
+      ORDER BY u.code ASC
+    `, [id, institutionId]);
+
+    res.json({
+      ok: true,
+      data: {
+        instructorId: id,
+        assigned_units: updatedAssignments
+      },
+      message: 'Fichas asignadas exitosamente al instructor.'
+    });
   } catch (err) {
     res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
   }
@@ -1466,7 +1702,7 @@ export const getCoordInstructors = async (req, res) => {
 
 export const createInstructor = async (req, res) => {
   try {
-    const { documento, nombre, password } = req.body;
+    const { documento, nombre, password, unitIds } = req.body;
     const institutionId = req.user.institutionId;
 
     if (!documento || !nombre || !password) {
@@ -1492,7 +1728,19 @@ export const createInstructor = async (req, res) => {
       [id, institutionId, documento, nombre, `MAT-${documento}`, hashedPwd, JSON.stringify(['INSTRUCTOR'])]
     );
 
-    await createAuditLog(req.user.id, 'CREATE_INSTRUCTOR', 'person', id, null, { documento, nombre });
+    // If unitIds provided, assign them
+    if (Array.isArray(unitIds) && unitIds.length > 0) {
+      const now = new Date().toISOString();
+      for (const uId of unitIds) {
+        const asgId = `asg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        await run(`
+          INSERT INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `, [asgId, institutionId, uId, id, now]);
+      }
+    }
+
+    await createAuditLog(req.user.id, 'CREATE_INSTRUCTOR', 'person', id, null, { documento, nombre, unitIds });
 
     res.status(201).json({ data: { id, documento, nombre, active: 1, roles: ['INSTRUCTOR'] } });
   } catch (err) {
@@ -1503,7 +1751,7 @@ export const createInstructor = async (req, res) => {
 export const updateInstructor = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, password, active } = req.body;
+    const { nombre, password, active, unitIds } = req.body;
     const institutionId = req.user.institutionId;
 
     const instructor = await get('SELECT * FROM people WHERE id = ? AND institution_id = ?', [id, institutionId]);
@@ -1527,7 +1775,21 @@ export const updateInstructor = async (req, res) => {
     params.push(id);
 
     await run(queryStr, params);
-    await createAuditLog(req.user.id, 'UPDATE_INSTRUCTOR', 'person', id, { nombre: instructor.nombre, active: instructor.active }, { nombre, active });
+
+    // If unitIds provided, update assignments
+    if (Array.isArray(unitIds)) {
+      await run('DELETE FROM instructor_assignments WHERE instructor_id = ? AND institution_id = ?', [id, institutionId]);
+      const now = new Date().toISOString();
+      for (const uId of unitIds) {
+        const asgId = `asg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        await run(`
+          INSERT INTO instructor_assignments (id, institution_id, unit_id, instructor_id, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `, [asgId, institutionId, uId, id, now]);
+      }
+    }
+
+    await createAuditLog(req.user.id, 'UPDATE_INSTRUCTOR', 'person', id, { nombre: instructor.nombre, active: instructor.active }, { nombre, active, unitIds });
 
     res.json({ data: { id, message: 'Instructor actualizado con éxito.' } });
   } catch (err) {
@@ -1864,20 +2126,150 @@ export const studentLateCheckin = async (req, res) => {
 // Submit session evidence (Instructor)
 export const submitSessionEvidence = async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = req.params.sessionId || req.params.id;
+    const file_name = req.body.file_name || req.body.fileName;
+    const file_data = req.body.file_data || req.body.fileData;
     const session = await get('SELECT * FROM attendance_sessions WHERE id = ?', [sessionId]);
     if (!session) {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
 
-    const now = new Date();
-    await run(`
-      UPDATE attendance_sessions
-      SET evidence_submitted = 1, evidence_submitted_at = ?
-      WHERE id = ?
-    `, [now.toISOString(), sessionId]);
+    // Verify institution
+    if (req.user?.institutionId && session.institution_id !== req.user.institutionId) {
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'No tienes acceso a esta sesión.' } });
+    }
 
-    res.json({ data: { message: 'Evidencia entregada al coordinador con éxito.' } });
+    // Authorization: coordinator, or creator of session, or instructor assigned to unit
+    const userRoles = req.user?.roles || [];
+    const isCoord = userRoles.includes('COORDINADOR');
+    if (!isCoord && req.user?.id) {
+      const isCreator = session.created_by === req.user.id;
+      const isAssigned = await get(
+        'SELECT id FROM instructor_assignments WHERE instructor_id = ? AND unit_id = ?',
+        [req.user.id, session.unit_id]
+      );
+      if (!isCreator && !isAssigned) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'No estás autorizado para entregar evidencias en esta sesión.' } });
+      }
+    }
+
+    const now = new Date();
+
+    // If file_name and file_data are provided, validate and persist file
+    if (file_data) {
+      const cleanFileName = sanitizeText(file_name || 'reporte_evidencia.xlsx', 120);
+      const ext = path.extname(cleanFileName).toLowerCase();
+      if (!['.xlsx', '.xls', '.pdf'].includes(ext)) {
+        return res.status(400).json({ error: { code: 'INVALID_FILE_TYPE', message: 'Solo se permiten archivos con formato .xlsx, .xls o .pdf.' } });
+      }
+
+      let base64Content = file_data;
+      let mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      if (file_data.includes(',')) {
+        const parts = file_data.split(',');
+        const matchMime = parts[0].match(/:(.*?);/);
+        if (matchMime) mimeType = matchMime[1];
+        base64Content = parts[1];
+      }
+
+      const buffer = Buffer.from(base64Content, 'base64');
+      if (buffer.length === 0) {
+        return res.status(400).json({ error: { code: 'EMPTY_FILE', message: 'El archivo adjunto está vacío.' } });
+      }
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ error: { code: 'FILE_TOO_LARGE', message: 'El archivo excede el tamaño máximo permitido de 10 MB.' } });
+      }
+
+      const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+      await run(`
+        UPDATE attendance_sessions
+        SET evidence_submitted = 1,
+            evidence_submitted_at = ?,
+            evidence_file_name = ?,
+            evidence_file_data = ?,
+            evidence_mime_type = ?,
+            evidence_file_size = ?,
+            evidence_hash = ?
+        WHERE id = ?
+      `, [now.toISOString(), cleanFileName, file_data, mimeType, buffer.length, hash, sessionId]);
+
+      await createAuditLog(
+        req.user?.id || 'INSTRUCTOR',
+        'SUBMIT_EVIDENCE',
+        'session',
+        sessionId,
+        { evidence_submitted: session.evidence_submitted },
+        { evidence_submitted: 1, evidence_file_name: cleanFileName, evidence_file_size: buffer.length, hash }
+      );
+    } else {
+      await run(`
+        UPDATE attendance_sessions
+        SET evidence_submitted = 1, evidence_submitted_at = ?
+        WHERE id = ?
+      `, [now.toISOString(), sessionId]);
+
+      await createAuditLog(
+        req.user?.id || 'INSTRUCTOR',
+        'SUBMIT_EVIDENCE',
+        'session',
+        sessionId,
+        { evidence_submitted: session.evidence_submitted },
+        { evidence_submitted: 1 }
+      );
+    }
+
+    res.json({ ok: true, data: { message: 'Evidencia entregada al coordinador con éxito.' } });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
+  }
+};
+
+// Download session evidence file (Coordinator / Instructor)
+export const downloadSessionEvidence = async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId || req.params.id;
+    const session = await get('SELECT * FROM attendance_sessions WHERE id = ?', [sessionId]);
+    if (!session) {
+      return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
+    }
+
+    // Verify institution
+    if (req.user?.institutionId && session.institution_id !== req.user.institutionId) {
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'No tienes acceso a esta sesión.' } });
+    }
+
+    // Verify role: Coordinator or creator/assigned instructor
+    const userRoles = req.user?.roles || [];
+    const isCoord = userRoles.includes('COORDINADOR') || userRoles.includes('COORDINATOR');
+    if (!isCoord && req.user?.id) {
+      const isCreator = session.created_by === req.user.id;
+      const isAssigned = await get(
+        'SELECT id FROM instructor_assignments WHERE instructor_id = ? AND unit_id = ?',
+        [req.user.id, session.unit_id]
+      );
+      if (!isCreator && !isAssigned) {
+        return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'No estás autorizado para descargar esta evidencia.' } });
+      }
+    }
+
+    if (!session.evidence_file_data) {
+      return res.status(404).json({ error: { code: 'NO_EVIDENCE_ATTACHED', message: 'No hay archivo de evidencia adjunto para esta sesión.' } });
+    }
+
+    let base64Content = session.evidence_file_data;
+    if (base64Content.includes(',')) {
+      base64Content = base64Content.split(',')[1];
+    }
+
+    const buffer = Buffer.from(base64Content, 'base64');
+    const fileName = session.evidence_file_name || `evidencia_${sessionId}.xlsx`;
+    const mimeType = session.evidence_mime_type || 'application/octet-stream';
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    return res.send(buffer);
   } catch (err) {
     res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
   }
@@ -1886,7 +2278,8 @@ export const submitSessionEvidence = async (req, res) => {
 // Get all sessions / evidences (Coordinator)
 export const getCoordEvidences = async (req, res) => {
   try {
-    const sessions = await query(`
+    const institutionId = req.user?.institutionId;
+    let sql = `
       SELECT 
         s.id,
         s.activated_at,
@@ -1894,15 +2287,30 @@ export const getCoordEvidences = async (req, res) => {
         s.status,
         s.evidence_submitted,
         s.evidence_submitted_at,
+        s.evidence_file_name,
+        s.evidence_mime_type,
+        s.evidence_file_size,
         u.code as ficha_code,
         u.name as ficha_name,
-        p.nombre as instructor_name
+        u.jornada as jornada,
+        COALESCE(p_creator.nombre, p_assigned.nombre, 'Sin asignar') as instructor_name
       FROM attendance_sessions s
       JOIN academic_units u ON s.unit_id = u.id
-      LEFT JOIN enrollments e ON e.unit_id = s.unit_id
-      LEFT JOIN people p ON p.id = e.person_id AND p.roles LIKE '%INSTRUCTOR%'
-      ORDER BY s.activated_at DESC
-    `);
+      LEFT JOIN people p_creator ON s.created_by = p_creator.id
+      LEFT JOIN instructor_assignments ia ON ia.unit_id = s.unit_id
+      LEFT JOIN people p_assigned ON ia.instructor_id = p_assigned.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (institutionId) {
+      sql += ' AND s.institution_id = ?';
+      params.push(institutionId);
+    }
+
+    sql += ' ORDER BY s.activated_at DESC';
+
+    const sessions = await query(sql, params);
     
     // Deduplicate sessions
     const seen = new Set();

@@ -614,13 +614,14 @@
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-12 9h12m-12 4h12M9 10h.01M9 14h.01M9 18h.01"></path></svg>
                 <span>Entregar Evidencia</span>
               </button>
+              <input type="file" id="evidenceFileInput" class="hidden" accept=".xlsx,.xls,.pdf">
             </div>
           </div>
 
-          <!-- Alert for closed/reopened session requirement -->
-          <div id="reportWarning" class="p-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs flex items-center gap-2.5">
+          <!-- Alert for session report info -->
+          <div id="reportWarning" class="hidden p-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs flex items-center gap-2.5">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-            <span>El reporte final en Excel se habilitará únicamente tras haber reabierto la sala para la fase de Salida de los aprendices.</span>
+            <span>Consolidado oficial de asistencia generado según registros de entrada.</span>
           </div>
 
           <div class="overflow-x-auto">
@@ -632,8 +633,8 @@
                   <th class="py-3 px-4 text-center">Horas Programadas</th>
                   <th class="py-3 px-4 text-center">Horas Asistidas</th>
                   <th class="py-3 px-4 text-center">Porcentaje de Jornada</th>
-                  <th class="py-3 px-4">Método Registro</th>
-                  <th class="py-3 px-4">Hora Entrada / Salida</th>
+                  <th class="py-3 px-4">Hora de Entrada</th>
+                  <th class="py-3 px-4 text-center">Puntualidad / Estado</th>
                 </tr>
               </thead>
               <tbody id="reportGridBody" class="divide-y divide-slate-800/40 text-slate-300">
@@ -641,6 +642,7 @@
                   <td colspan="7" class="text-center py-8 text-slate-500">Inicie la sesión para consolidar el reporte.</td>
                 </tr>
               </tbody>
+            </table>
           </div>
         </div>
 
@@ -1010,13 +1012,14 @@
               <tr class="border-b border-slate-800 text-slate-400 text-xs font-semibold">
                 <th class="py-3 px-4">Nombre Completo</th>
                 <th class="py-3 px-4">Documento</th>
+                <th class="py-3 px-4">Fichas Asignadas</th>
                 <th class="py-3 px-4">Estado</th>
                 <th class="py-3 px-4 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody id="coordInstructorsGridBody" class="divide-y divide-slate-800/40 text-slate-300">
               <tr>
-                <td colspan="4" class="text-center py-8 text-slate-500">Cargando instructores...</td>
+                <td colspan="5" class="text-center py-8 text-slate-500">Cargando instructores...</td>
               </tr>
             </tbody>
           </table>
@@ -1214,6 +1217,39 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- MODAL: ASIGNAR FICHAS A INSTRUCTOR -->
+    <div id="assignFichasModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+      <div class="w-full max-w-lg glass rounded-3xl p-8 shadow-2xl relative flex flex-col max-h-[90vh]">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div>
+            <h3 class="text-lg font-bold text-white">Asignar Fichas a Instructor</h3>
+            <p id="assignFichasInstructorSubtitle" class="text-xs text-[#39A900] font-semibold mt-0.5">Instructor</p>
+          </div>
+          <button id="btnCloseAssignFichas" type="button" class="text-slate-400 hover:text-white p-1 rounded-lg">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        <p class="text-xs text-slate-400 mt-4 mb-2">Seleccione una o más fichas disponibles para asignarlas a este instructor. Ningún profesor podrá abrir clases sin estar asignado a una o más fichas.</p>
+
+        <input type="hidden" id="assignFichasInstructorId">
+
+        <div id="assignFichasList" class="flex-1 overflow-y-auto space-y-2 py-2 pr-1 max-h-[350px]">
+          <div class="text-center py-6 text-slate-500 text-xs">Cargando fichas disponibles...</div>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-4 border-t border-slate-800/60 mt-4">
+          <button type="button" id="btnCancelAssignFichas" class="px-4 py-2 bg-slate-900/60 border border-slate-700/50 text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-800 transition-all">
+            Cancelar
+          </button>
+          <button type="button" id="btnSaveAssignFichas" class="px-4 py-2 bg-[#39A900] hover:bg-[#329200] active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-[#39A900]/10 flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            <span>Guardar Asignaciones</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1460,6 +1496,39 @@
               Restablecer Contraseña
             </button>
           </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL ASIGNAR FICHAS A INSTRUCTOR -->
+    <div id="assignFichasModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div class="glass w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-800 relative flex flex-col max-h-[85vh]">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800 flex-shrink-0">
+          <div>
+            <span class="text-[10px] font-bold text-[#39A900] uppercase tracking-widest bg-[#39A900]/10 px-2 py-0.5 rounded-full">Gestión Académica</span>
+            <h3 class="text-base font-bold text-white mt-1" id="assignFichasModalTitle">Asignar Fichas a Instructor</h3>
+            <p class="text-xs text-slate-400" id="assignFichasModalSubtitle">Selecciona las fichas autorizadas para este docente.</p>
+          </div>
+          <button id="btnCloseAssignFichasModal" type="button" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+        </div>
+
+        <input type="hidden" id="assignInstructorId">
+
+        <div class="my-3 text-xs text-slate-400 flex items-center justify-between">
+          <span>Fichas del Centro de Formación:</span>
+          <span class="text-[11px] text-slate-500 font-mono" id="assignFichasCount">0 seleccionadas</span>
+        </div>
+
+        <div id="assignFichasList" class="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[160px] max-h-[300px]">
+          <!-- Dynamic checklist populated by JS -->
+          <div class="text-center py-6 text-slate-500 text-xs">Cargando fichas...</div>
+        </div>
+
+        <div class="flex gap-3 pt-4 border-t border-slate-800 flex-shrink-0">
+          <button type="button" id="btnCancelAssignFichas" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl text-xs transition-all">Cancelar</button>
+          <button type="button" id="btnSaveAssignFichas" class="flex-1 bg-[#39A900] hover:bg-[#329200] text-white font-semibold py-2.5 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#39A900]/20">
+            <span>Guardar Asignaciones</span>
+          </button>
         </div>
       </div>
     </div>
