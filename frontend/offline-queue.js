@@ -1,40 +1,40 @@
 ﻿/**
- * SENA ATTENDANCE SYSTEM - Offline Queue Manager (Buffer Offline)
- * Permite almacenar registros de asistencia en localStorage cuando no hay se├▒al
- * y sincronizarlos de forma autom├ítica e idempotente al recuperar la conexi├│n.
+ * SENA ATTENDANCE SYSTEM - Offline Queue Manager (Capa 1: Experiencia / Offline)
+ * Almacena marcaciones de asistencia en localStorage cuando no hay señal y las
+ * sincroniza con deduplicación, idempotencia, reintentos controlados y manejo visible de conflictos.
  */
 
 const QUEUE_STORAGE_KEY = 'sena_attendance_offline_queue';
+const MAX_RETRIES = 5;
+
+export function buildIdempotencyKey(checkinData = {}) {
+  const token = String(checkinData.token || 'manual').trim().toUpperCase();
+  const documento = String(checkinData.documento || '').trim();
+  const sessionId = String(checkinData.sessionId || '').trim();
+  return `${sessionId || token}::${documento}`;
+}
 
 export class OfflineAttendanceQueue {
   constructor(options = {}) {
     this.storageKey = options.storageKey || QUEUE_STORAGE_KEY;
-    this.apiBaseUrl = options.apiBaseUrl || window.location.origin;
+    this.apiBaseUrl = options.apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
     this.isSyncing = false;
     this.onQueueChangeCallbacks = [];
     this.onSyncCompleteCallbacks = [];
+    this.onConflictCallbacks = [];
 
     this._initListeners();
   }
 
-  /**
-   * Obtiene todos los elementos encolados en localStorage
-   * @returns {Array<Object>}
-   */
   getQueue() {
     try {
       const data = localStorage.getItem(this.storageKey);
       return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.warn('Error reading offline queue from localStorage:', e);
+    } catch {
       return [];
     }
   }
 
-  /**
-   * Guarda la cola completa en localStorage
-   * @param {Array<Object>} queue 
-   */
   _saveQueue(queue) {
     try {
       localStorage.setItem(this.storageKey, JSON.stringify(queue));
@@ -45,81 +45,87 @@ export class OfflineAttendanceQueue {
   }
 
   /**
-   * Encola un nuevo registro de asistencia
-   * @param {Object} checkinData Datos de la marcaci├│n (token, documento, photo_evidence, etc.)
-   * @returns {Object} El elemento encolado con ID y timestamp
+   * Encola una marcación evitando duplicados por clave de idempotencia (token/session + documento).
    */
   enqueue(checkinData) {
     const queue = this.getQueue();
+    const idempotencyKey = checkinData.idempotencyKey || buildIdempotencyKey(checkinData);
+
+    const existing = queue.find((item) => item.idempotencyKey === idempotencyKey);
+    if (existing) {
+      return existing;
+    }
+
     const item = {
       id: 'offline_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      idempotencyKey,
       queuedAt: new Date().toISOString(),
       retries: 0,
       status: 'pending',
-      data: checkinData
+      lastError: null,
+      data: { ...checkinData, idempotencyKey }
     };
     queue.push(item);
     this._saveQueue(queue);
-    console.log('[OfflineQueue] Marcaci├│n encolada:', item.id);
     return item;
   }
 
-  /**
-   * Elimina un elemento de la cola
-   * @param {string} id 
-   */
   remove(id) {
-    const queue = this.getQueue().filter(item => item.id !== id);
+    const queue = this.getQueue().filter((item) => item.id !== id);
     this._saveQueue(queue);
   }
 
-  /**
-   * Limpia toda la cola
-   */
+  dismissConflict(id) {
+    this.remove(id);
+  }
+
   clear() {
     this._saveQueue([]);
   }
 
-  /**
-   * Conteo de marcaciones pendientes
-   * @returns {number}
-   */
   get pendingCount() {
-    return this.getQueue().length;
+    return this.getQueue().filter((item) => item.status !== 'conflict').length;
   }
 
-  /**
-   * Sincroniza todas las marcaciones pendientes con el backend
-   * @param {string} authToken Token JWT opcional
-   * @returns {Promise<{synced: number, failed: number}>}
-   */
+  get conflicts() {
+    return this.getQueue().filter((item) => item.status === 'conflict');
+  }
+
   async syncAll(authToken = '') {
     if (this.isSyncing) {
-      console.log('[OfflineQueue] Sincronizaci├│n en curso...');
-      return { synced: 0, failed: 0 };
+      return { synced: 0, failed: 0, conflicts: 0 };
     }
 
-    if (!navigator.onLine) {
-      console.log('[OfflineQueue] Sin conexi├│n. No se puede sincronizar.');
-      return { synced: 0, failed: 0 };
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return { synced: 0, failed: 0, conflicts: 0 };
     }
 
     const queue = this.getQueue();
     if (queue.length === 0) {
-      return { synced: 0, failed: 0 };
+      return { synced: 0, failed: 0, conflicts: 0 };
     }
 
     this.isSyncing = true;
     let synced = 0;
     let failed = 0;
+    let conflicts = 0;
     const remainingQueue = [];
 
     for (const item of queue) {
+      if (item.status === 'conflict') {
+        remainingQueue.push(item);
+        conflicts++;
+        continue;
+      }
+
       try {
-        const { token, documento, photo_evidence, verification_method, biometric_match_score } = item.data;
-        const targetUrl = (this.apiBaseUrl || '') + '/public/attendance/' + (token || 'manual') + '/register';
-        
-        const headers = { 'Content-Type': 'application/json' };
+        const { token, documento, verification_method } = item.data;
+        const targetUrl = (this.apiBaseUrl || '') + '/public/attendance/' + encodeURIComponent(token || 'manual') + '/register';
+
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': item.idempotencyKey
+        };
         if (authToken) {
           headers['Authorization'] = 'Bearer ' + authToken;
         }
@@ -129,59 +135,63 @@ export class OfflineAttendanceQueue {
           headers,
           body: JSON.stringify({
             documento,
-            photo_evidence,
             verification_method: verification_method || 'offline_sync',
-            biometric_match_score,
+            idempotency_key: item.idempotencyKey,
             offline_queued_at: item.queuedAt
           })
         });
 
-        if (response.ok || response.status === 200 || response.status === 201) {
+        if (response.ok || response.status === 200 || response.status === 201 || response.status === 409) {
+          // 409 (ya registrado) es idempotente: se limpia de la cola
           synced++;
-          console.log('[OfflineQueue] Marcaci├│n sincronizada exitosamente:', item.id);
+        } else if (response.status >= 400 && response.status < 500) {
+          const errData = await response.json().catch(() => ({}));
+          item.status = 'conflict';
+          item.lastError = errData.error?.message || `Conflicto HTTP ${response.status}`;
+          remainingQueue.push(item);
+          conflicts++;
+          this._notifyConflict(item);
         } else {
           const errData = await response.json().catch(() => ({}));
-          console.warn('[OfflineQueue] Error del servidor al sincronizar:', errData);
-          // Si es un error de cliente irrecuperable (ej: documento no existe), o si ya super├│ 5 reintentos
           item.retries = (item.retries || 0) + 1;
-          item.lastError = errData.error?.message || 'Error del servidor';
-          if (item.retries < 5) {
+          item.lastError = errData.error?.message || 'Error temporal del servidor';
+          if (item.retries < MAX_RETRIES) {
             remainingQueue.push(item);
           } else {
-            console.error('[OfflineQueue] Descartando elemento tras 5 reintentos fallidos:', item.id);
+            item.status = 'conflict';
+            remainingQueue.push(item);
             failed++;
+            conflicts++;
+            this._notifyConflict(item);
           }
         }
-      } catch (err) {
-        console.warn('[OfflineQueue] Error de red durante la sincronizaci├│n:', err);
+      } catch {
         item.retries = (item.retries || 0) + 1;
+        item.lastError = 'Error de red durante la sincronización';
         remainingQueue.push(item);
         failed++;
-        break; // Detener el ciclo si fall├│ la conexi├│n
+        break;
       }
     }
 
     this._saveQueue(remainingQueue);
     this.isSyncing = false;
 
-    this._notifySyncComplete({ synced, failed, remaining: remainingQueue.length });
-    return { synced, failed };
+    const stats = { synced, failed, conflicts, remaining: remainingQueue.length };
+    this._notifySyncComplete(stats);
+    return stats;
   }
 
-  /**
-   * Suscribe un callback a los cambios en la cola
-   * @param {Function} cb 
-   */
   onQueueChange(cb) {
     if (typeof cb === 'function') this.onQueueChangeCallbacks.push(cb);
   }
 
-  /**
-   * Suscribe un callback al finalizar la sincronizaci├│n
-   * @param {Function} cb 
-   */
   onSyncComplete(cb) {
     if (typeof cb === 'function') this.onSyncCompleteCallbacks.push(cb);
+  }
+
+  onConflict(cb) {
+    if (typeof cb === 'function') this.onConflictCallbacks.push(cb);
   }
 
   _notifyQueueChange(queue) {
@@ -196,16 +206,20 @@ export class OfflineAttendanceQueue {
     }
   }
 
+  _notifyConflict(item) {
+    for (const cb of this.onConflictCallbacks) {
+      try { cb(item); } catch (e) { console.error(e); }
+    }
+  }
+
   _initListeners() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        console.log('[OfflineQueue] Conexi├│n restablecida. Iniciando sincronizaci├│n autom├ítica...');
         this.syncAll();
       });
 
-      // Intento de sincronizaci├│n peri├│dico cada 30 segundos si hay internet
       setInterval(() => {
-        if (navigator.onLine && this.pendingCount > 0) {
+        if (typeof navigator !== 'undefined' && navigator.onLine && this.pendingCount > 0) {
           this.syncAll();
         }
       }, 30000);
@@ -213,5 +227,4 @@ export class OfflineAttendanceQueue {
   }
 }
 
-// Instancia global exportada por defecto
 export const offlineQueue = new OfflineAttendanceQueue();

@@ -1,3 +1,18 @@
+// Safe HTML escaping & URL validation helpers (XSS protection)
+const HTML_ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch]);
+}
+function isSafeDataOrHttpUrl(url) {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (/^data:(application\/pdf|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/vnd\.ms-excel|image\/png|image\/jpeg);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) {
+    return true;
+  }
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('/');
+}
+
 // State Management
 let storedPerson = null;
 try {
@@ -875,13 +890,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const result = await res.json();
         if (res.ok) {
-          forgotFeedback.textContent = result.data?.message || 'Código generado correctamente.';
+          forgotFeedback.textContent = result.data?.message || 'Si tu cuenta está activa, enviamos las instrucciones de recuperación.';
           forgotFeedback.className = 'mb-4 p-3 rounded-xl text-xs font-semibold text-center bg-blue-500/10 text-blue-400 border border-blue-500/20';
           forgotFeedback.classList.remove('hidden');
           forgotResetSection?.classList.remove('hidden');
-          if (result.data?.resetToken && resetTokenInput) {
-            resetTokenInput.value = result.data.resetToken;
-          }
         } else {
           forgotFeedback.textContent = result.error?.message || 'Error al procesar solicitud.';
           forgotFeedback.className = 'mb-4 p-3 rounded-xl text-xs font-semibold text-center bg-red-500/10 text-red-400 border border-red-500/20';
@@ -951,37 +963,62 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Staff Authentication handler
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginFeedback.classList.add('hidden');
-  
-  const doc = loginDoc.value.trim();
-  const pass = loginPassword.value.trim();
+// Unified Institutional Authentication handler (Aprendiz, Instructor, Coordinador)
+if (loginForm) {
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginFeedback.classList.add('hidden');
+    const submitBtn = document.getElementById('btnUnifiedLoginSubmit');
 
-  try {
-    const res = await fetch(`${state.apiUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documento: doc, password: pass })
-    });
+    const doc = loginDoc.value.trim();
+    const pass = loginPassword.value;
 
-    const result = await res.json();
-    if (res.ok) {
-      state.token = result.data.token;
-      state.person = result.data.person;
-      localStorage.setItem('token', state.token);
-      localStorage.setItem('person', JSON.stringify(state.person));
-      showDashboard();
-    } else {
-      loginFeedback.textContent = result.error.message || 'Error al iniciar sesión.';
+    if (!doc || !pass) {
+      loginFeedback.textContent = 'Ingresa tu documento o correo y tu contraseña.';
       loginFeedback.classList.remove('hidden');
+      loginFeedback.focus();
+      return;
     }
-  } catch (err) {
-    loginFeedback.textContent = 'Error de conexión con el servidor.';
-    loginFeedback.classList.remove('hidden');
-  }
-});
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Ingresando...';
+    }
+
+    try {
+      const res = await fetch(`${state.apiUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: doc, documento: doc, password: pass })
+      });
+
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result.data?.token) {
+        state.token = result.data.token;
+        state.person = result.data.person;
+        localStorage.setItem('token', state.token);
+        localStorage.setItem('person', JSON.stringify(state.person));
+        loginPassword.value = '';
+        showDashboard();
+      } else {
+        loginPassword.value = '';
+        loginFeedback.textContent = result.error?.message || 'Credenciales inválidas. Verifica tus datos e intenta de nuevo.';
+        loginFeedback.classList.remove('hidden');
+        loginFeedback.focus();
+      }
+    } catch (err) {
+      loginPassword.value = '';
+      loginFeedback.textContent = 'Error de conexión con el servidor.';
+      loginFeedback.classList.remove('hidden');
+      loginFeedback.focus();
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Ingresar';
+      }
+    }
+  });
+}
 
 btnLogout.addEventListener('click', () => {
   state.token = '';
@@ -2746,13 +2783,16 @@ function renderStudentExcuses(excuses) {
 
     const fechaSesion = e.session_date ? e.session_date.split('T')[0] : (e.session_id ? e.session_id.substring(0, 10) : '-');
 
+    const safeFechaSesion = escapeHtml(fechaSesion);
+    const safeText = escapeHtml(e.text || '-');
+    const safeRadicadoAt = escapeHtml(radicadoAt);
     studentExcusesGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
-        <td class="py-3 px-4 font-mono text-xs text-slate-300 font-semibold">${fechaSesion}</td>
-        <td class="py-3 px-4 text-xs text-slate-200 max-w-xs truncate" title="${e.text || ''}">${e.text || '-'}</td>
+        <td class="py-3 px-4 font-mono text-xs text-slate-300 font-semibold">${safeFechaSesion}</td>
+        <td class="py-3 px-4 text-xs text-slate-200 max-w-xs truncate" title="${safeText}">${safeText}</td>
         <td class="py-3 px-4">${supportLink}</td>
         <td class="py-3 px-4">${statusBadge}</td>
-        <td class="py-3 px-4 font-mono text-xs text-slate-400">${radicadoAt}</td>
+        <td class="py-3 px-4 font-mono text-xs text-slate-400">${safeRadicadoAt}</td>
       </tr>
     `;
   });
@@ -2819,9 +2859,9 @@ function renderInstructorExcusesGrid(excuses) {
 
   excuses.forEach(e => {
     let supportCol = '<span class="text-slate-600">Sin soporte</span>';
-    if (e.file_data) {
+    if (e.file_data && isSafeDataOrHttpUrl(e.file_data)) {
       supportCol = `
-        <a href="${e.file_data}" download="${e.file_name}" class="inline-flex items-center gap-1 text-xs text-[#39A900] hover:underline font-semibold">
+        <a href="${escapeHtml(e.file_data)}" download="${escapeHtml(e.file_name || 'soporte')}" class="inline-flex items-center gap-1 text-xs text-[#39A900] hover:underline font-semibold">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
           <span>Descargar</span>
         </a>
@@ -2837,29 +2877,34 @@ function renderInstructorExcusesGrid(excuses) {
 
     let actionsCol = '-';
     if (e.status === 'pending') {
+      const safeId = escapeHtml(e.id);
       actionsCol = `
         <div class="flex items-center justify-center gap-1.5">
-          <button onclick="resolveExcuse('${e.id}', 'approved')" class="text-xs bg-[#39A900]/15 hover:bg-[#39A900]/25 border border-[#39A900]/20 text-[#39A900] px-2 py-1 rounded-md transition-all font-semibold">
+          <button onclick="resolveExcuse('${safeId}', 'approved')" class="text-xs bg-[#39A900]/15 hover:bg-[#39A900]/25 border border-[#39A900]/20 text-[#39A900] px-2 py-1 rounded-md transition-all font-semibold">
             Aprobar
           </button>
-          <button onclick="resolveExcuse('${e.id}', 'rejected')" class="text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-2 py-1 rounded-md transition-all font-semibold">
+          <button onclick="resolveExcuse('${safeId}', 'rejected')" class="text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-2 py-1 rounded-md transition-all font-semibold">
             Rechazar
           </button>
         </div>
       `;
     }
 
-    const sessionDate = (e.room_created_at || e.created_at || '').split('T')[0] || '-';
+    const sessionDate = escapeHtml((e.room_created_at || e.created_at || '').split('T')[0] || '-');
+    const safeStudentName = escapeHtml(e.student_name);
+    const safeStudentDoc = escapeHtml(e.student_doc);
+    const safeUnitCode = escapeHtml(e.unit_code);
+    const safeExcuseText = escapeHtml(e.text);
 
     instructorExcusesGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
         <td class="py-3 px-4">
-          <div class="font-medium text-slate-200">${e.student_name}</div>
-          <div class="text-[10px] text-slate-500 font-mono">${e.student_doc}</div>
+          <div class="font-medium text-slate-200">${safeStudentName}</div>
+          <div class="text-[10px] text-slate-500 font-mono">${safeStudentDoc}</div>
         </td>
-        <td class="py-3 px-4 text-xs font-semibold text-slate-400">${e.unit_code}</td>
+        <td class="py-3 px-4 text-xs font-semibold text-slate-400">${safeUnitCode}</td>
         <td class="py-3 px-4 font-mono text-xs">${sessionDate}</td>
-        <td class="py-3 px-4 text-xs max-w-xs truncate" title="${e.text}">${e.text}</td>
+        <td class="py-3 px-4 text-xs max-w-xs truncate" title="${safeExcuseText}">${safeExcuseText}</td>
         <td class="py-3 px-4">${supportCol}</td>
         <td class="py-3 px-4">${statusBadge}</td>
         <td class="py-3 px-4 text-center">${actionsCol}</td>
@@ -3408,26 +3453,32 @@ function renderCoordFichas(fichas) {
 
     const toggleText = f.active ? 'Desactivar' : 'Activar';
 
+    const safeFId = escapeHtml(f.id);
+    const safeFCode = escapeHtml(f.code);
+    const safeFName = escapeHtml(f.name);
+    const safeFJornada = escapeHtml(f.jornada || 'DIURNA');
+    const safeFModalidad = escapeHtml(f.modalidad || 'PRESENCIAL');
+
     const deleteBtn = (f.status !== 'PENDING_DELETION' && f.status !== 'DELETED') ? `
-      <button onclick="openRequestFichaDeletionModal('${f.id}', '${f.code}', '${f.name}')" class="text-xs bg-red-950/20 border border-red-500/20 hover:bg-red-900/30 text-red-400 px-2.5 py-1 rounded-md transition-all">
+      <button onclick="openRequestFichaDeletionModal('${safeFId}', '${safeFCode}', '${safeFName}')" class="text-xs bg-red-950/20 border border-red-500/20 hover:bg-red-900/30 text-red-400 px-2.5 py-1 rounded-md transition-all">
         Solicitar Baja
       </button>
     ` : '';
 
     coordFichasGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
-        <td class="py-3 px-4 font-mono font-semibold text-[#39A900]">${f.code}</td>
-        <td class="py-3 px-4 text-slate-200">${f.name}</td>
+        <td class="py-3 px-4 font-mono font-semibold text-[#39A900]">${safeFCode}</td>
+        <td class="py-3 px-4 text-slate-200">${safeFName}</td>
         <td class="py-3 px-4 text-center">${jornadaBadge}</td>
         <td class="py-3 px-4 text-center">${modalidadBadge}</td>
-        <td class="py-3 px-4 text-center font-semibold text-slate-400">${f.learners_count || 0}</td>
+        <td class="py-3 px-4 text-center font-semibold text-slate-400">${Number(f.learners_count) || 0}</td>
         <td class="py-3 px-4">${statusText}</td>
         <td class="py-3 px-4 text-right">
           <div class="flex justify-end gap-2">
-            <button onclick="editFicha('${f.id}', '${f.code}', '${f.name}', ${f.active}, '${f.jornada || 'DIURNA'}', '${f.modalidad || 'PRESENCIAL'}')" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md transition-all">
+            <button onclick="editFicha('${safeFId}', '${safeFCode}', '${safeFName}', ${Boolean(f.active)}, '${safeFJornada}', '${safeFModalidad}')" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md transition-all">
               Editar
             </button>
-            <button onclick="toggleFichaActive('${f.id}', '${f.name}', ${f.active})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-red-400 px-2.5 py-1 rounded-md transition-all">
+            <button onclick="toggleFichaActive('${safeFId}', '${safeFName}', ${Boolean(f.active)})" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-red-400 px-2.5 py-1 rounded-md transition-all">
               ${toggleText}
             </button>
             ${deleteBtn}
@@ -3815,13 +3866,26 @@ function renderCoordAuditLogs(logs) {
     const detailObj = l.metadata_json ? JSON.parse(l.metadata_json) : (l.after_json ? JSON.parse(l.after_json) : {});
     const detailStr = JSON.stringify(detailObj);
 
+    const safeActor = escapeHtml(actor);
+    const safeAction = escapeHtml(l.action);
+    const safeEntity = escapeHtml(`${l.entity_type}:${l.entity_id ? l.entity_id.substring(0, 14) : ''}`);
+    const safeDetailStr = escapeHtml(detailStr);
+    const safeDateStr = escapeHtml(dateStr);
+
+    let safeActionBadge = `<span class="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">${safeAction}</span>`;
+    if (String(l.action || '').includes('DELETE') || String(l.action || '').includes('ANONYMIZED')) {
+      safeActionBadge = `<span class="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20">${safeAction}</span>`;
+    } else if (String(l.action || '').includes('APPROVE') || String(l.action || '').includes('REGISTRATION')) {
+      safeActionBadge = `<span class="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20">${safeAction}</span>`;
+    }
+
     coordAuditGridBody.innerHTML += `
       <tr class="hover:bg-slate-900/20 border-b border-slate-800/40">
-        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap">${dateStr}</td>
-        <td class="py-2.5 px-4 whitespace-nowrap">${actionBadge}</td>
-        <td class="py-2.5 px-4 text-slate-300 font-sans text-xs">${actor}</td>
-        <td class="py-2.5 px-4 text-slate-400">${l.entity_type}:${l.entity_id ? l.entity_id.substring(0, 14) : ''}</td>
-        <td class="py-2.5 px-4 text-slate-500 text-[11px] max-w-xs truncate" title="${detailStr}">${detailStr}</td>
+        <td class="py-2.5 px-4 text-slate-400 whitespace-nowrap">${safeDateStr}</td>
+        <td class="py-2.5 px-4 whitespace-nowrap">${safeActionBadge}</td>
+        <td class="py-2.5 px-4 text-slate-300 font-sans text-xs">${safeActor}</td>
+        <td class="py-2.5 px-4 text-slate-400">${safeEntity}</td>
+        <td class="py-2.5 px-4 text-slate-500 text-[11px] max-w-xs truncate" title="${safeDetailStr}">${safeDetailStr}</td>
       </tr>
     `;
   });
