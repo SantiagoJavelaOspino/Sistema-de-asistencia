@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import app from '../src/server.js';
 import { get, query, run } from '../src/db.js';
 import { isWithinBusinessDays } from '../src/controllers.js';
+import { setPasswordResetNotifier } from '../src/modules/identity/ports/passwordResetNotifier.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev-only';
 
@@ -135,6 +136,10 @@ export async function runAuditVerificationTests() {
     });
 
     let resetToken;
+    let notifiedResetToken;
+    setPasswordResetNotifier(async ({ rawToken }) => {
+      notifiedResetToken = rawToken;
+    });
     await check('Auth: forgot-password nunca devuelve el token secreto al navegador', async () => {
       const testUser = await get('SELECT id FROM people WHERE email = ?', [`learner_${stamp}@audit.local`]);
       assert.equal(testUser?.id, ids.learner, 'el usuario de recuperación de prueba no fue creado');
@@ -147,12 +152,13 @@ export async function runAuditVerificationTests() {
     });
 
     await check('Auth: un token de reset no puede reutilizarse', async () => {
-      assert.ok(resetToken, 'no hay token de prueba para comprobar uso único');
+      const tokenToConsume = notifiedResetToken;
+      assert.ok(tokenToConsume, 'no hay token emitido por el puerto de notificación para comprobar uso único');
       const first = await response(fetch(`${baseUrl}/public/auth/reset-password`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, newPassword: 'ChangedAudit123!' })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenToConsume, newPassword: 'ChangedAudit123!' })
       }));
       const second = await response(fetch(`${baseUrl}/public/auth/reset-password`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, newPassword: 'AnotherAudit123!' })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenToConsume, newPassword: 'AnotherAudit123!' })
       }));
       assert.equal(first.status, 200, `primer uso devolvió ${first.status}`);
       assert.equal(second.status, 400, `reuso devolvió ${second.status}`);
@@ -179,6 +185,10 @@ export async function runAuditVerificationTests() {
     });
 
     await check('BR-09: aprobar una excusa restaura exactamente seis horas', async () => {
+      const approvedByInstructor = await response(fetch(`${baseUrl}/api/instructor/excuses/${ids.excuse}/resolve`, {
+        method: 'POST', headers: auth(instructorPayload), body: JSON.stringify({ status: 'approved' })
+      }));
+      assert.equal(approvedByInstructor.status, 200, `resolución por instructor devolvió ${approvedByInstructor.status}`);
       const record = await get('SELECT * FROM attendance_records WHERE session_id = ? AND person_id = ?', [ids.session, ids.peer]);
       assert.equal(record?.horas_validadas_asistencia, 6, `horas restauradas: ${record?.horas_validadas_asistencia}`);
       assert.equal(record?.horas_inasistencia_acumulada, 0, `horas de falta: ${record?.horas_inasistencia_acumulada}`);

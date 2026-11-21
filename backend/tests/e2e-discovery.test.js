@@ -11,6 +11,7 @@ import http from 'http';
 import jwt from 'jsonwebtoken';
 import app from '../src/server.js';
 import { run, get, query } from '../src/db.js';
+import { setPasswordResetNotifier } from '../src/modules/identity/ports/passwordResetNotifier.js';
 
 export async function runDiscoveryFlowTests() {
   console.log('\n[TEST SUITE] Flujos End-to-End de la Hoja de Ruta (Fases 1 a 4)');
@@ -79,7 +80,12 @@ export async function runDiscoveryFlowTests() {
   assert.strictEqual(resLoginEmail.status, 200, 'Login con correo institucional debe ser exitoso');
   console.log('  ✓ POST /public/student/login autentica bidireccionalmente (documento y correo)');
 
-  // 4. Flujo de Recuperación de Contraseña (Forgot & Reset)
+  // 4. Flujo de Recuperación de Contraseña (Forgot & Reset sin exponer token en HTTP)
+  let capturedResetToken = null;
+  setPasswordResetNotifier(async ({ rawToken }) => {
+    capturedResetToken = rawToken;
+  });
+
   const resForgot = await fetch(`${baseUrl}/public/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -87,13 +93,13 @@ export async function runDiscoveryFlowTests() {
   });
   assert.strictEqual(resForgot.status, 200, 'Forgot password debe responder 200');
   const forgotData = await resForgot.json();
-  const resetToken = forgotData.data.resetToken;
-  assert(resetToken, 'Token de recuperación debe ser retornado para el flujo seguro');
+  assert.strictEqual(forgotData.data.resetToken, undefined, 'Forgot password nunca debe exponer resetToken en HTTP');
+  assert(capturedResetToken, 'El puerto de notificación debe recibir el token de recuperación');
 
   const resReset = await fetch(`${baseUrl}/public/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: resetToken, newPassword: 'NewPassword2026!' })
+    body: JSON.stringify({ token: capturedResetToken, newPassword: 'NewPassword2026!' })
   });
   assert.strictEqual(resReset.status, 200, 'Reset password debe ser exitoso');
 

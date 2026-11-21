@@ -2,8 +2,12 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { get, run, createAuditLog } from './db.js';
+import { resolveJwtSecret } from './shared/infrastructure/config.js';
+import { logger } from './shared/infrastructure/logger.js';
+import { normalizeRoles } from './modules/identity/application/policies.js';
+import { notifyPasswordReset } from './modules/identity/ports/passwordResetNotifier.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev-only';
+const JWT_SECRET = resolveJwtSecret();
 
 export const login = async (req, res) => {
   try {
@@ -69,12 +73,13 @@ export const login = async (req, res) => {
           nombre: person.nombre,
           documento: person.documento,
           roles,
+          terms_accepted: person.terms_accepted || 0,
           must_change_password: person.must_change_password === 1
         }
       }
     });
   } catch (err) {
-    console.error('Login error:', err);
+    logger.error('auth.login_failed', { error: err.message });
     return res.status(500).json({
       error: { code: 'SERVER_ERROR', message: 'Error interno del servidor.' }
     });
@@ -188,26 +193,39 @@ export const forgotPassword = async (req, res) => {
 
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const nowIso = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 3600000).toISOString(); // 1 hour validity
+
+    // Invalidar tokens de recuperación previos no utilizados para este usuario
+    await run(
+      'UPDATE password_resets SET used_at = ? WHERE person_id = ? AND used_at IS NULL',
+      [nowIso, person.id]
+    );
 
     const resetId = 'reset_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     await run(
       'INSERT INTO password_resets (id, person_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
-      [resetId, person.id, tokenHash, expiresAt, new Date().toISOString()]
+      [resetId, person.id, tokenHash, expiresAt, nowIso]
     );
 
     await createAuditLog(person.id, 'PASSWORD_RESET_REQUESTED', 'people', person.id, null, null, {
       ip: req.ip || req.socket.remoteAddress
     });
 
+    await notifyPasswordReset({
+      personId: person.id,
+      email: person.email,
+      expiresAt,
+      rawToken
+    });
+
     return res.status(200).json({
       data: {
-        message: neutralMessage,
-        resetToken: rawToken
+        message: neutralMessage
       }
     });
   } catch (err) {
-    console.error('Forgot password error:', err);
+    logger.error('auth.forgot_password_failed', { error: err.message });
     return res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'Error interno del servidor.' } });
   }
 };
@@ -393,7 +411,12 @@ export const authenticate = (req, res, next) => {
 };
 
 export const requireRole = (...allowedRoles) => (req, res, next) => {
-  const userRoles = req.user.roles || [];
+  if (!req.user) {
+    return res.status(401).json({
+      error: { code: 'UNAUTHORIZED', message: 'Token de autenticación no proporcionado.' }
+    });
+  }
+  const userRoles = normalizeRoles(req.user);
   const hasRole = allowedRoles.some(r => userRoles.includes(r));
   if (!hasRole) {
     return res.status(403).json({

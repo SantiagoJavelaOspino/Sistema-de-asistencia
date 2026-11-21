@@ -3,8 +3,31 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import path from 'path';
+import { resolveJwtSecret } from './shared/infrastructure/config.js';
+import { assertSessionAccess, AuthorizationError } from './modules/identity/application/policies.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev-only';
+const JWT_SECRET = resolveJwtSecret();
+
+const isAssignedToUnit = async (instructorId, unitId) => {
+  const row = await get(
+    'SELECT id FROM instructor_assignments WHERE instructor_id = ? AND unit_id = ?',
+    [instructorId, unitId]
+  );
+  return Boolean(row);
+};
+
+const enforceSessionAccess = async (req, res, session) => {
+  try {
+    await assertSessionAccess(req.user, session, { isAssignedToUnit });
+    return true;
+  } catch (err) {
+    if (err instanceof AuthorizationError) {
+      res.status(err.status).json({ error: { code: err.code, message: err.message } });
+      return false;
+    }
+    throw err;
+  }
+};
 
 // Helper to sanitize text and prevent script injection
 export const sanitizeText = (str, maxLength = 255) => {
@@ -300,6 +323,7 @@ export const activateSession = async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
+    if (!(await enforceSessionAccess(req, res, session))) return;
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 15 * 60000);
@@ -332,6 +356,7 @@ export const closeSession = async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
+    if (!(await enforceSessionAccess(req, res, session))) return;
 
     const now = new Date();
     await run(`
@@ -358,6 +383,7 @@ export const reopenRoom = async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
+    if (!(await enforceSessionAccess(req, res, session))) return;
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 15 * 60000); // 15 mins for checkout
@@ -704,6 +730,7 @@ export const manualOverride = async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: { code: 'SESSION_NOT_FOUND', message: 'Sesión no encontrada.' } });
     }
+    if (!(await enforceSessionAccess(req, res, session))) return;
 
     let person = await get('SELECT * FROM people WHERE documento = ? AND active = 1', [cleanDoc]);
     if (!person) {
@@ -1197,8 +1224,12 @@ export const resolveExcuse = async (req, res) => {
       return res.status(404).json({ error: { code: 'EXCUSE_NOT_FOUND', message: 'Excusa no encontrada.' } });
     }
 
+    const excuseSession = await get('SELECT * FROM attendance_sessions WHERE id = ?', [excuse.session_id]);
+    if (!(await enforceSessionAccess(req, res, excuseSession))) return;
+
     // Update status in excuses
     await run('UPDATE excuses SET status = ? WHERE id = ?', [status, id]);
+    await createAuditLog(req.user?.id || 'system', 'EXCUSE_RESOLVED', 'excuses', id, { status: excuse.status }, { status }, { sessionId: excuse.session_id });
 
     if (status === 'approved') {
       // Find or create attendance record and mark it justified
@@ -2599,7 +2630,7 @@ export const registerStudent = async (req, res) => {
       nombre: cleanName,
       roles: ['APRENDIZ']
     };
-    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET || 'super-secret-key-for-dev-only', { expiresIn: '24h' });
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '24h' });
 
     return res.status(201).json({
       data: {

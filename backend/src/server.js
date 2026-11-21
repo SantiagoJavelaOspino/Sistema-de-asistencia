@@ -3,6 +3,9 @@ import express from 'express';
 import cors from 'cors';
 import { initDb } from './db.js';
 import { login, studentLogin, authenticate, requireRole, changePassword, verifyPassword, forgotPassword, resetPassword } from './auth.js';
+import { getAppConfig } from './shared/infrastructure/config.js';
+import { createRateLimiter, securityHeadersMiddleware } from './shared/infrastructure/rateLimit.js';
+import { logger } from './shared/infrastructure/logger.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -45,8 +48,6 @@ import {
   getCoordEvidences,
   deleteStudentAccount,
   acceptStudentTerms,
-  getPendingBiometrics,
-  resolveBiometricException,
   requestFichaDeletion,
   approveFichaDeletion,
   rejectFichaDeletion,
@@ -61,13 +62,29 @@ import {
 } from './controllers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const config = getAppConfig();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = config.port;
 
-app.use(cors({ origin: '*' }));
+const allowedOriginsSet = new Set(config.allowedOrigins);
+app.use(securityHeadersMiddleware);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOriginsSet.has(origin) || (!config.isProduction && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+const authRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'auth' });
+const resetRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10, keyPrefix: 'reset' });
+const checkinRateLimiter = createRateLimiter({ windowMs: 60_000, max: 120, keyPrefix: 'checkin' });
 
 const frontendCandidates = [
   path.resolve(__dirname, '../../frontend'),
@@ -102,22 +119,22 @@ app.get('/health', (req, res) => res.status(200).send('ok'));
 app.get('/ready',  (req, res) => res.status(200).send('ready'));
 
 // ── Public Auth & Registration ───────────────────────────────────────────────
-app.post('/api/auth/login', login);
-app.post('/public/student/login', studentLogin);
-app.post('/public/student/register', registerStudent);
+app.post('/api/auth/login', authRateLimiter, login);
+app.post('/public/student/login', authRateLimiter, studentLogin);
+app.post('/public/student/register', authRateLimiter, registerStudent);
 app.get('/public/fichas', getPublicFichas);
-app.post('/public/auth/forgot-password', forgotPassword);
-app.post('/public/auth/reset-password', resetPassword);
+app.post('/public/auth/forgot-password', resetRateLimiter, forgotPassword);
+app.post('/public/auth/reset-password', resetRateLimiter, resetPassword);
 app.post('/api/auth/verify-password', authenticate, verifyPassword);
 app.post('/api/auth/change-password', authenticate, changePassword);
 
 // ── Public Check-in endpoints ─────────────────────────────────────────────────
-app.post('/attendance/checkin',                      checkin);
-app.post('/public/attendance/:token/register',        checkin);
-app.post('/public/attendance/:token/self-register',   selfRegisterCheckin);
-app.post('/public/attendance/:token/late-request',    submitLateRequest);
-app.post('/public/attendance/:token/check-document',  checkDocument);
-app.post('/public/attendance/:token/late-checkin',     studentLateCheckin);
+app.post('/attendance/checkin',                      checkinRateLimiter, checkin);
+app.post('/public/attendance/:token/register',        checkinRateLimiter, checkin);
+app.post('/public/attendance/:token/self-register',   checkinRateLimiter, selfRegisterCheckin);
+app.post('/public/attendance/:token/late-request',    checkinRateLimiter, submitLateRequest);
+app.post('/public/attendance/:token/check-document',  checkinRateLimiter, checkDocument);
+app.post('/public/attendance/:token/late-checkin',     checkinRateLimiter, studentLateCheckin);
 
 // ── QR Student Redirection (Redirects directly to main application panel) ──
 app.get('/attendance/:token', (req, res) => {
@@ -125,70 +142,70 @@ app.get('/attendance/:token', (req, res) => {
   return res.redirect(`/?token=${encodeURIComponent(token)}`);
 });
 
+const requireStaff = requireRole('INSTRUCTOR', 'COORDINADOR');
+const requireApprentice = requireRole('APRENDIZ');
+const requireCoordinator = requireRole('COORDINADOR');
+
 // ── Protected routes (Instructor catalog & control) ───────────────────────────
-app.get('/api/institutions',                           authenticate, getInstitutions);
-app.get('/api/institutions/:institutionId/units',      authenticate, getUnits);
-app.get('/api/units/:unitId/people',                   authenticate, getPeople);
+app.get('/api/institutions',                           authenticate, requireStaff, getInstitutions);
+app.get('/api/institutions/:institutionId/units',      authenticate, requireStaff, getUnits);
+app.get('/api/units/:unitId/people',                   authenticate, requireStaff, getPeople);
 
-app.post('/api/sessions',                              authenticate, createSessionDraft);
-app.post('/api/sessions/:sessionId/activate',          authenticate, activateSession);
-app.post('/api/sessions/:sessionId/close',             authenticate, closeSession);
-app.get('/api/sessions/:sessionId',                    authenticate, getSession);
-app.get('/api/sessions/:sessionId/qr-token',           authenticate, getSessionQrToken);
-app.get('/api/sessions',                               authenticate, getSessionsHistory);
+app.post('/api/sessions',                              authenticate, requireStaff, createSessionDraft);
+app.post('/api/sessions/:sessionId/activate',          authenticate, requireStaff, activateSession);
+app.post('/api/sessions/:sessionId/close',             authenticate, requireStaff, closeSession);
+app.get('/api/sessions/:sessionId',                    authenticate, requireStaff, getSession);
+app.get('/api/sessions/:sessionId/qr-token',           authenticate, requireStaff, getSessionQrToken);
+app.get('/api/sessions',                               authenticate, requireStaff, getSessionsHistory);
 
-app.get('/api/sessions/:sessionId/present',            authenticate, getPresent);
-app.get('/api/sessions/:sessionId/absent',             authenticate, getAbsent);
-app.get('/api/sessions/:sessionId/rejections',         authenticate, getRejections);
+app.get('/api/sessions/:sessionId/present',            authenticate, requireStaff, getPresent);
+app.get('/api/sessions/:sessionId/absent',             authenticate, requireStaff, getAbsent);
+app.get('/api/sessions/:sessionId/rejections',         authenticate, requireStaff, getRejections);
 
 // Room & Manual Override
-app.post('/room/create',                               authenticate, createRoom);
-app.post('/room/reopen',                               authenticate, reopenRoom);
-app.post('/attendance/manual-override',                authenticate, manualOverride);
-app.post('/attendance/manual-checkin',                 authenticate, manualLateCheckin);
-app.get('/reports/session/:sessionId',                 authenticate, getSessionReport);
+app.post('/room/create',                               authenticate, requireStaff, createRoom);
+app.post('/room/reopen',                               authenticate, requireStaff, reopenRoom);
+app.post('/attendance/manual-override',                authenticate, requireStaff, manualOverride);
+app.post('/attendance/manual-checkin',                 authenticate, requireStaff, manualLateCheckin);
+app.get('/reports/session/:sessionId',                 authenticate, requireStaff, getSessionReport);
 
 // Student Portal
-app.get('/api/student/history',                        authenticate, getStudentHistory);
-app.get('/api/student/active-session',                 authenticate, getStudentActiveSession);
-app.post('/api/student/excuses',                       authenticate, submitExcuse);
-app.post('/api/excuses/submit',                        authenticate, submitExcuse);
-app.delete('/api/student/delete-account',              authenticate, deleteStudentAccount);
-app.post('/api/student/accept-terms',                  authenticate, acceptStudentTerms);
+app.get('/api/student/history',                        authenticate, requireApprentice, getStudentHistory);
+app.get('/api/student/active-session',                 authenticate, requireApprentice, getStudentActiveSession);
+app.post('/api/student/excuses',                       authenticate, requireApprentice, submitExcuse);
+app.post('/api/excuses/submit',                        authenticate, requireApprentice, submitExcuse);
+app.delete('/api/student/delete-account',              authenticate, requireApprentice, deleteStudentAccount);
+app.post('/api/student/accept-terms',                  authenticate, requireApprentice, acceptStudentTerms);
 
 // Instructor Units & Excuses
-app.get('/api/instructor/my-units',                    authenticate, getInstructorUnits);
-app.get('/api/instructor/excuses',                     authenticate, getInstructorExcuses);
-app.post('/api/instructor/excuses/:id/resolve',        authenticate, resolveExcuse);
+app.get('/api/instructor/my-units',                    authenticate, requireStaff, getInstructorUnits);
+app.get('/api/instructor/excuses',                     authenticate, requireStaff, getInstructorExcuses);
+app.post('/api/instructor/excuses/:id/resolve',        authenticate, requireStaff, resolveExcuse);
 
 // Instructor Late Requests & Evidence
-app.get('/api/instructor/late-requests',               authenticate, getInstructorLateRequests);
-app.post('/api/instructor/late-requests/:id/resolve',  authenticate, resolveLateRequest);
-app.post('/api/sessions/:sessionId/evidence',          authenticate, submitSessionEvidence);
-
-// Biometric Exceptions
-app.get('/api/sessions/:sessionId/pending-biometrics', authenticate, getPendingBiometrics);
-app.post('/api/attendance/resolve-biometric/:recordId', authenticate, resolveBiometricException);
+app.get('/api/instructor/late-requests',               authenticate, requireStaff, getInstructorLateRequests);
+app.post('/api/instructor/late-requests/:id/resolve',  authenticate, requireStaff, resolveLateRequest);
+app.post('/api/sessions/:sessionId/evidence',          authenticate, requireStaff, submitSessionEvidence);
 
 // ── Coordinator Endpoints ──────────────────────────────────────────────────────
-app.get('/api/coord/instructors',                      authenticate, requireRole('COORDINADOR'), getCoordInstructors);
-app.post('/api/coord/instructors',                     authenticate, requireRole('COORDINADOR'), createInstructor);
-app.put('/api/coord/instructors/:id',                  authenticate, requireRole('COORDINADOR'), updateInstructor);
-app.post('/api/coord/instructors/:id/units',            authenticate, requireRole('COORDINADOR'), assignInstructorUnits);
-app.get('/api/coord/fichas',                           authenticate, requireRole('COORDINADOR'), getCoordFichas);
-app.post('/api/coord/fichas',                          authenticate, requireRole('COORDINADOR'), createFicha);
-app.put('/api/coord/fichas/:id',                       authenticate, requireRole('COORDINADOR'), updateFicha);
-app.post('/api/coord/fichas/:id/request-deletion',     authenticate, requireRole('COORDINADOR'), requestFichaDeletion);
-app.get('/api/coord/deletion-requests',                authenticate, requireRole('COORDINADOR'), getPendingDeletionRequests);
-app.post('/api/coord/deletion-requests/:requestId/approve', authenticate, requireRole('COORDINADOR'), approveFichaDeletion);
-app.post('/api/coord/deletion-requests/:requestId/reject',  authenticate, requireRole('COORDINADOR'), rejectFichaDeletion);
-app.get('/api/coord/evidences',                        authenticate, requireRole('COORDINADOR'), getCoordEvidences);
-app.get('/api/coord/evidences/:sessionId/download',    authenticate, downloadSessionEvidence);
-app.get('/api/coord/audit-logs',                        authenticate, requireRole('COORDINADOR'), getAuditLogs);
+app.get('/api/coord/instructors',                      authenticate, requireCoordinator, getCoordInstructors);
+app.post('/api/coord/instructors',                     authenticate, requireCoordinator, createInstructor);
+app.put('/api/coord/instructors/:id',                  authenticate, requireCoordinator, updateInstructor);
+app.post('/api/coord/instructors/:id/units',            authenticate, requireCoordinator, assignInstructorUnits);
+app.get('/api/coord/fichas',                           authenticate, requireCoordinator, getCoordFichas);
+app.post('/api/coord/fichas',                          authenticate, requireCoordinator, createFicha);
+app.put('/api/coord/fichas/:id',                       authenticate, requireCoordinator, updateFicha);
+app.post('/api/coord/fichas/:id/request-deletion',     authenticate, requireCoordinator, requestFichaDeletion);
+app.get('/api/coord/deletion-requests',                authenticate, requireCoordinator, getPendingDeletionRequests);
+app.post('/api/coord/deletion-requests/:requestId/approve', authenticate, requireCoordinator, approveFichaDeletion);
+app.post('/api/coord/deletion-requests/:requestId/reject',  authenticate, requireCoordinator, rejectFichaDeletion);
+app.get('/api/coord/evidences',                        authenticate, requireCoordinator, getCoordEvidences);
+app.get('/api/coord/evidences/:sessionId/download',    authenticate, requireCoordinator, downloadSessionEvidence);
+app.get('/api/coord/audit-logs',                        authenticate, requireCoordinator, getAuditLogs);
 
 // ── Error Handling ────────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('Unhandled Error:', err);
+  logger.error('http.unhandled_error', { path: req.path, method: req.method, error: err?.message });
   res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'Ocurrió un error inesperado en el servidor.' } });
 });
 
