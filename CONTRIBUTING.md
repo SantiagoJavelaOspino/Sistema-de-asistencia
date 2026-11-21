@@ -1,43 +1,25 @@
-# Contributing
+# Contribuir al Sistema de Asistencia SENA
 
-Contributions are welcome by pull request, and are released under the MIT
-[LICENSE](LICENSE).
+## Antes de desarrollar
 
-## Read these first
+1. Lea [`docs/architecture/n-layer-architecture.md`](docs/architecture/n-layer-architecture.md).
+2. Identifique la capa y el módulo dueños del cambio.
+3. Escriba o ajuste una prueba que reproduzca el comportamiento esperado.
+4. Si cambia un contrato, una regla académica o una decisión técnica, actualice el documento correspondiente bajo `docs/`.
 
-| Read | Why |
-|---|---|
-| [`00-sdd-guide.md`](00-sdd-guide.md) | The four phases, their gates, and the order the sections are filled in |
-| [`00-governance/documentation-rules.md`](00-governance/documentation-rules.md) | When a document counts as done, and the review checklist it must pass |
-| [`00-governance/git-conventions.md`](00-governance/git-conventions.md) | Branch names, conventional commits, merge policy |
+## Reglas de contribución
 
-Open an issue before any change that adds, removes or renames a document: the
-section structure is this framework's public interface.
+- No saltar capas: las rutas delegan; los casos de uso coordinan; el dominio no conoce HTTP, SQL o configuración; los repositorios concentran SQL.
+- No añadir lógica nueva a `backend/src/controllers.js` o `frontend/app.js` sin una excepción documentada y un plan de extracción.
+- Toda ruta sensible verifica autenticación, rol y acceso al recurso.
+- Mantener SQL parametrizado y migraciones compatibles con el motor validado.
+- No incluir secretos, tokens, datos personales o evidencias en código, pruebas o logs.
 
-## Document conventions
+## Verificación mínima
 
-- One question per document. If it answers two, it should have been two documents.
-- 25-80 lines. Below 25 it is a stub; above 80 it holds two topics. `README.md` and
-  `00-sdd-guide.md` are exempt from the upper bound. `CHANGELOG.md` and this file are
-  not framework documents and fall outside the rule entirely — a changelog grows by
-  one release at a time and is meant to pass 80 lines.
-- Content is tables, lists and Mermaid diagrams; prose carries the "why" only.
-- English throughout, relative links only, and no unresolved placeholder markers.
-- Every framework document closes with a `**Related:**` footer — templates and the SDD
-  guide included. The three root files carry none; they are not framework documents.
-  Section documents also open
-  `# NN — Title Case Name`; records and templates keep their family's id convention
-  instead — `ADR-NNN`, `HU-NN`, `TC-NNN`, `INC-NNN` — and the stack guides, the SDD
-  guide and the root files carry their own titles.
-- Files named `_template-*` are copied into place, never edited where they sit.
-- The subject is always one deployable application. Anything that only exists once
-  parts are deployed separately belongs to the sibling framework linked from the
-  README, not here.
+```text
+npm test
+node backend/tests/audit-verification.test.js
+```
 
-## Verifying a change
-
-1. Every relative link resolves, and every Mermaid diagram renders on GitHub.
-2. The document passes the review checklist in `00-governance/documentation-rules.md`.
-3. The line count is inside the range above.
-4. An entry is added under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
-5. A second person has reviewed it — only then is the INSTRUCTIONS block deleted.
+Para cambios de capas, ejecute además `node backend/tests/architecture-layers.test.js`. Una contribución no se declara terminada sin registrar los comandos y resultados en la evidencia de la entrega.

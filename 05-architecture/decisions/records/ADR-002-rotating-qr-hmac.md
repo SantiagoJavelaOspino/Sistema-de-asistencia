@@ -27,4 +27,4 @@ window to accommodate network transmission latency.
 
 ---
 
-**Related:** [`ADR-001-modular-monolith-as-default.md`](./ADR-001-modular-monolith-as-default.md)
+**Related:** [`ADR-001-n-layer-architecture.md`](./ADR-001-n-layer-architecture.md)

@@ -2,7 +2,7 @@
 
 ## Uso
 
-Copiar desde **Inicio del prompt** hasta **Fin del prompt** en Anti-gravity. Este encargo implementa los hallazgos de auditoría y exige una auditoría de cierre. La arquitectura obligatoria es un monolito modular por N capas; en este proyecto N = 7.
+Copiar desde **Inicio del prompt** hasta **Fin del prompt** en Anti-gravity. Este encargo implementa los hallazgos de auditoría y exige una auditoría de cierre. La arquitectura obligatoria es por N capas; en este proyecto N = 7.
 
 ## Inicio del prompt
 
@@ -10,7 +10,7 @@ Eres el responsable técnico de implementar el plan de mejora del repositorio `S
 
 ### Resultado que debes entregar
 
-1. Un monolito modular de **7 capas**, según `docs/architecture/n-layer-modular-monolith.md`. No propongas ni crees microservicios, mensajería distribuida, bases de datos por servicio ni una reescritura total.
+1. Una arquitectura de **7 capas**, según `docs/architecture/n-layer-architecture.md`. No propongas ni crees microservicios, mensajería distribuida, bases de datos por servicio ni una reescritura total.
 2. Las correcciones del informe `docs/validation/audit-report.md`, empezando por los riesgos críticos y altos.
 3. Una pantalla de acceso SENA accesible, usable y coherente con `docs/ui-ux/login-redesign-proposal.md`.
 4. Pruebas automatizadas, CI y evidencias de validación suficientes para repetir la auditoría de cierre.
@@ -19,7 +19,7 @@ Eres el responsable técnico de implementar el plan de mejora del repositorio `S
 ### Fuentes de verdad que debes leer antes de modificar código
 
 - `docs/validation/audit-report.md`
-- `docs/architecture/n-layer-modular-monolith.md`
+- `docs/architecture/n-layer-architecture.md`
 - `docs/ui-ux/login-redesign-proposal.md`
 - `docs/architecture/`, `docs/decisions/`, `docs/security/` y `docs/api/`
 - `backend/tests/audit-verification.test.js` y la suite existente
@@ -91,7 +91,7 @@ No paralelices todavía si dos cambios tocan `server.js`, el mismo contrato o un
 - Corrige la compatibilidad PostgreSQL y pruébala en CI; no declares soporte hasta que pase la misma suite crítica que SQLite.
 - Explicita el origen y la actualización de `programKey`/malla académica. Toda corrección de asistencia debe conservar una traza auditable.
 
-**Salida:** monolito modular en 7 capas con pruebas SQLite/PostgreSQL relevantes.
+**Salida:** arquitectura de 7 capas con pruebas SQLite/PostgreSQL relevantes.
 
 #### Iteración 4 — UX, accesibilidad y resistencia de cliente
 

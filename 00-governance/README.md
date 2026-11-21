@@ -4,8 +4,8 @@
 
 This section establishes the engineering governance and collaboration standards for
 the **SENA Academic Attendance System** (`sena-attendance-system`). It governs how
-our team plans, branches, reviews, tests, documents, and secures a single deployable
-modular monolith application across all development sprints.
+our team plans, branches, reviews, tests, documents, and secures an application
+organized according to the project’s seven-layer architecture.
 
 ## Documents
 
@@ -21,9 +21,9 @@ modular monolith application across all development sprints.
 
 ## Out of scope
 
-This framework governs a single deployable Node.js modular monolith running on a
-single process and shared database. Microservices patterns (distributed transactions,
-service meshes, sagas) are intentionally excluded.
+The team process supports the architecture defined in
+[`docs/architecture/n-layer-architecture.md`](../docs/architecture/n-layer-architecture.md).
+Distributed-system patterns are outside the scope of this project.
 
 ## Verification checklist
 

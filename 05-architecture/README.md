@@ -1,25 +1,13 @@
-# 05 — Architecture
+# 05 — Arquitectura
 
-## Purpose
+La arquitectura vigente del Sistema de Asistencia SENA es de **N capas, con N = 7**. Su fuente normativa está en [`docs/architecture/n-layer-architecture.md`](../docs/architecture/n-layer-architecture.md).
 
-This section documents the internal structural architecture of the single deployable
-modular monolith application, defining layers, module boundaries, and ADR records.
+| Documento | Propósito |
+| --- | --- |
+| [`n-layer-architecture.md`](./n-layer-architecture.md) | Referencia breve a la decisión de siete capas. |
+| [`layered-architecture.md`](./layered-architecture.md) | Dirección de dependencias y controles por capa. |
+| [`module-structure.md`](./module-structure.md) | Organización de módulos en la migración gradual. |
+| [`boundary-enforcement.md`](./boundary-enforcement.md) | Reglas que evitan acoplamiento entre capas. |
+| [`decisions/README.md`](./decisions/README.md) | Índice de decisiones. |
 
-## Documents
-
-| Document | Answers | Priority |
-|---|---|---|
-| [modular-monolith.md](./modular-monolith.md) | Why a modular monolith and how is it organized? | ⭐ |
-| [layered-architecture.md](./layered-architecture.md) | How are presentation, application, and persistence layered? | ⭐ |
-| [module-structure.md](./module-structure.md) | What does the folder layout look like on disk? | ⭐ |
-| [boundary-enforcement.md](./boundary-enforcement.md) | How are inter-module boundaries guarded against coupling? | ⭐ |
-| [decisions/README.md](./decisions/README.md) | Architectural Decision Records (ADRs) index | ⭐ |
-
-## Architectural pattern
-
-The system is built as a **Lightweight Modular Monolith** in Node.js (Express 5)
-with a client SPA (Vanilla JS + Tailwind CSS) and conmutable persistence (SQLite/PostgreSQL).
-
----
-
-**Related:** [`modular-monolith.md`](./modular-monolith.md) · [`layered-architecture.md`](./layered-architecture.md)
+Los documentos de esta sección complementan `docs/`; si hay discrepancia, prevalece la documentación vigente bajo `docs/architecture/` y `docs/decisions/`.

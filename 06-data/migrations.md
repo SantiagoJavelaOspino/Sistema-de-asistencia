@@ -22,4 +22,4 @@ the `initDb` lifecycle hook before the HTTP server binds to the listening port.
 
 ---
 
-**Related:** [`models.md`](./models.md) · [`../05-architecture/modular-monolith.md`](../05-architecture/modular-monolith.md)
+**Related:** [`models.md`](./models.md) · [`../05-architecture/n-layer-architecture.md`](../05-architecture/n-layer-architecture.md)

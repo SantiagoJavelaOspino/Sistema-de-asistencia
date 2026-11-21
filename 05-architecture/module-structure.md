@@ -27,4 +27,4 @@ sena-attendance-system/
 
 ---
 
-**Related:** [`modular-monolith.md`](./modular-monolith.md) · [`boundary-enforcement.md`](./boundary-enforcement.md)
+**Related:** [`n-layer-architecture.md`](./n-layer-architecture.md) · [`boundary-enforcement.md`](./boundary-enforcement.md)

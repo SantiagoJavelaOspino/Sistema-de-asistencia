@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-11-21  
 **Repositorio:** `Sistema-de-asistencia` (rama `main`)  
-**Arquitectura objetivo:** Monolito modular de 7 capas (`N = 7`, según `docs/architecture/n-layer-modular-monolith.md`)  
+**Arquitectura objetivo:** Arquitectura de 7 capas (`N = 7`, según `docs/architecture/n-layer-architecture.md`)
 **Entorno de verificación:** Node.js `v26.13.1`, npm `11.20.0`, SQLite local (`backend/database.sqlite`)
 
 ---

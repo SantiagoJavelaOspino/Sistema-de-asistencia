@@ -2,7 +2,7 @@
 
 ## Architectural rules
 
-To prevent coupling and architectural drift inside the monolith, the following rules apply:
+To prevent coupling and architectural drift between layers, the following rules apply:
 
 1. **Explicit API Contracts:** Modules interact via documented exported functions, never private internals.
 2. **Table Ownership:** Each relational table is owned by exactly one module. Cross-module writes must call the owner's service.

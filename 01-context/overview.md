@@ -2,7 +2,7 @@
 
 ## What it does
 
-The **SENA Academic Attendance System** is a unified modular monolith application
+The **SENA Academic Attendance System** is a web application organized in seven layers
 that replaces traditional paper-based roll calls with a fast, dynamic QR and network
 check-in mechanism, automatic fractional hours calculation, and audit-ready reports.
 

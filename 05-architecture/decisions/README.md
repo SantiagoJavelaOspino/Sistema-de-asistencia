@@ -7,7 +7,7 @@ Every decision follows a standardized structure outlining context, options, deci
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [ADR-001](./records/ADR-001-modular-monolith-as-default.md) | Modular Monolith as default architecture | Accepted | 2026-07-25 |
+| [ADR-001](./records/ADR-001-n-layer-architecture.md) | Arquitectura de N capas | Superseded | 2026-11-21 |
 | [ADR-002](./records/ADR-002-rotating-qr-hmac.md) | Rotating QR code with HMAC-SHA256 and leeway | Accepted | 2026-08-10 |
 | [ADR-003](./records/ADR-003-anti-overengineering-facial-ip.md) | Elimination of facial AI and rigid IP blocking | Accepted | 2026-08-22 |
 
@@ -23,4 +23,4 @@ Use [`./_template-adr.md`](./_template-adr.md) when proposing a new architectura
 
 ---
 
-**Related:** [`../modular-monolith.md`](../modular-monolith.md) · [`_template-adr.md`](./_template-adr.md)
+**Related:** [`../n-layer-architecture.md`](../n-layer-architecture.md) · [`_template-adr.md`](./_template-adr.md)

@@ -1,5 +1,5 @@
 /**
- * Capa 7 (Bootstrap / Composition Root) - Arranque del monolito modular de 7 capas.
+ * Capa 7 (Bootstrap / Composition Root) - Ensamblaje de la arquitectura de 7 capas.
  */
 process.env.TZ = 'America/Bogota';
 import express from 'express';

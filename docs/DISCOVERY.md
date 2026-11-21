@@ -174,7 +174,7 @@ Siguiendo las mejores prácticas de Product Management (Marty Cagan), evaluamos 
 |---|---|---|---|
 | **Riesgo de Valor** (*Value Risk*) | Que los instructores encontraran el sistema más engorroso que el papel y lo abandonaran. | La creación de sala toma 1 solo clic y el informe se descarga en Excel listo para entregar. Valor evidente e inmediato. | 🟢 Bajo |
 | **Riesgo de Usabilidad** (*Usability Risk*) | Que los aprendices con celulares viejos no pudieran cargar librerías pesadas de inteligencia artificial. | Se descartó la biometría facial en cliente (ver ADR-003); se usa QR dinámico rotativo cada 15s y código manual de contingencia de 6 caracteres. | 🟢 Controlado |
-| **Riesgo de Factibilidad** (*Feasibility Risk*) | Que el servidor colapsara con 50 peticiones concurrentes en el mismo segundo al proyectar el QR. | Arquitectura monolito modular de 7 capas en proceso único Express optimizado (meta `p95 < 300 ms`). | 🟢 Bajo |
+| **Riesgo de Factibilidad** (*Feasibility Risk*) | Que el servidor colapsara con 50 peticiones concurrentes en el mismo segundo al proyectar el QR. | Arquitectura de 7 capas con Express optimizado (meta `p95 < 300 ms`). | 🟢 Bajo |
 | **Riesgo de Viabilidad Legal** (*Viability / Legal Risk*) | Violación de normativas de datos personales (Ley 1581 de 2012 - Habeas Data). | Consentimiento explícito obligatorio en el registro, trazabilidad auditable y opción de anonimización/supresión de cuenta en cualquier momento. | 🟢 Controlado |
 
 ---
@@ -200,4 +200,4 @@ Para validar cuantitativamente que la solución resuelve el problema, se definen
 
 1. **Problema Real y Frecuente:** Afecta a cientos de fichas y miles de horas de formación cada semana en todo el país.
 2. **Costo de Inacción:** Seguir usando papel representa una fuga constante de horas lectivas de calidad, facilita la suplantación y satura de burocracia al cuerpo docente.
-3. **Factibilidad Demostrada:** Es técnicamente viable construir una solución ligera, portátil y segura bajo el monolito modular de 7 capas definido en [`docs/architecture/n-layer-modular-monolith.md`](./architecture/n-layer-modular-monolith.md).
+3. **Factibilidad Demostrada:** Es técnicamente viable construir una solución ligera, portátil y segura bajo la arquitectura de 7 capas definida en [`docs/architecture/n-layer-architecture.md`](./architecture/n-layer-architecture.md).

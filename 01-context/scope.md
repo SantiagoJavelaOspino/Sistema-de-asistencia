@@ -19,7 +19,7 @@
 | Client-side facial AI | Excluded per ADR-003: heavy neural nets crash low-end phones and fail in classroom light |
 | Rigid IP subnet blocking | Excluded per ADR-003: apprentices frequently use mobile data (4G/5G) |
 | Physical biometric hardware | Classroom solution relies on ubiquitous personal smartphone web browsers |
-| Microservices architecture | Single deployable monolith avoids distributed transaction overhead |
+| Arquitectura distribuida | Está fuera del alcance académico: el proyecto se organiza por capas y no requiere coordinación entre procesos |
 
 ---
 

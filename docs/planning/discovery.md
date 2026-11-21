@@ -132,7 +132,7 @@ graph TD
     end
 
     subgraph ADRs["3. Decisiones Arquitectónicas (ADRs)"]
-        ADR1["ADR 001: Monolito Web SPA + Express"]
+        ADR1["ADR 001: Aplicación web SPA + Express por capas"]
         ADR2["ADR 002: Token Temporal HMAC 60s"]
         ADR3["ADR 003: Eliminación de Sobreingeniería"]
     end
@@ -142,6 +142,6 @@ graph TD
     P3 --> RF3 --> ADR3
 ```
 
-* **Relación con ADR 001:** La necesidad de no exigir instalación de APKs a los aprendices y permitir despliegue inmediato con `npm run dev` justificó la elección del **Monolito Web SPA + Express + SQLite**.
+* **Relación con ADR 001:** La necesidad de no exigir instalación de APKs a los aprendices y permitir despliegue inmediato con `npm run dev` justificó la elección de una **aplicación web SPA + Express + SQLite organizada por capas**.
 * **Relación con ADR 002:** El riesgo de fraude por capturas de pantalla compartidas en WhatsApp justificó el algoritmo de **Token QR Rotativo firmado con HMAC**.
 * **Relación con ADR 003:** La identificación en Discovery de que los celulares de gama de entrada sufrían lentitud con redes neuronales y que los aprendices usan datos móviles justificó la **eliminación de sobreingeniería** (biometría flexible con fallback a 15s, rotación a 60s y chequeo de IP permisivo).

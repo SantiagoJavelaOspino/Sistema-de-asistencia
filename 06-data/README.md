@@ -15,7 +15,7 @@ migration strategy across SQLite and PostgreSQL engines for the attendance syste
 
 ## Core database principles
 
-1. Single relational schema shared across all modules in the monolith.
+1. Esquema relacional único consumido mediante repositorios de la capa de persistencia.
 2. Table names and column identifiers use strictly lowercase `snake_case`.
 3. Conmutable support: 100% feature parity between local SQLite and production PostgreSQL.
 4. Schema updates execute automatically during application bootstrap via `initDb`.
@@ -28,4 +28,4 @@ migration strategy across SQLite and PostgreSQL engines for the attendance syste
 
 ---
 
-**Related:** [`../05-architecture/modular-monolith.md`](../05-architecture/modular-monolith.md) · [`models.md`](./models.md)
+**Related:** [`../05-architecture/n-layer-architecture.md`](../05-architecture/n-layer-architecture.md) · [`models.md`](./models.md)

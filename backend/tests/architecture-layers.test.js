@@ -1,5 +1,5 @@
 /**
- * Pruebas automatizadas de fronteras arquitectónicas (Monolito Modular de 7 Capas)
+ * Pruebas automatizadas de fronteras arquitectónicas (Arquitectura de 7 Capas)
  * y portabilidad SQLite -> PostgreSQL.
  */
 import assert from 'node:assert/strict';

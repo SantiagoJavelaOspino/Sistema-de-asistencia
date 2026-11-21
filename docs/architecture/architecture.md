@@ -1,54 +1,41 @@
-# Arquitectura — app-attendance
+# Arquitectura técnica vigente
 
-Este documento describe la arquitectura física y lógica vigente en el proyecto `app-attendance`.
+La arquitectura oficial se define en [`n-layer-architecture.md`](./n-layer-architecture.md). Este documento describe su aplicación actual y no reemplaza la regla de siete capas.
 
-## Topología de ejecución
+## Flujo de ejecución
 
-```
-Celular del estudiante
-     │ (Escanea QR con cámara o ingresa código manual)
-     ▼
-Navegador móvil → GET /attendance/{token}          ← Renderiza HTML dinámico de registro
-                 POST /public/attendance/{token}/register
-                       │
-                       ▼
-                 API (back/) ── Servidor Express (Puerto 4000)
-                       │        Sirve estáticos del Instructor en /
-                       │        Maneja lógica de negocio e IP Check
-                       │
-                 Base de Datos ── SQLite (Local `database.sqlite`) o PostgreSQL (Nube via DATABASE_URL)
+```text
+Navegador web
+  -> Capa 1: experiencia (HTML, JavaScript, cola offline)
+  -> Capa 2: rutas y controladores HTTP Express
+  -> Capa 3: casos de uso y políticas de autorización
+  -> Capa 4: reglas de negocio puras
+  -> Capa 5: puertos
+  -> Capa 6: repositorios SQL y migraciones
+  -> Capa 7: configuración, JWT, conexión y bootstrap
+  -> SQLite en desarrollo / PostgreSQL cuando se valide en CI
 ```
 
-## Estructura de Capas Real
+## Límites actuales
 
-| Componente | Carpeta | Puerto | Responsabilidad |
-|---|---|---|---|
-| **Frontend SPA** | `app/` | 4000 (servido estático) | Panel del Instructor y Coordinador. SPA en HTML/JS con Tailwind CDN. |
-| **Backend REST API** | `back/` | 4000 | Expone endpoints, gestiona JWT, calcula puntualidad y valida tokens QR. |
-| **Persistencia** | `back/database.sqlite` / `PostgreSQL` | - | Tablas relacionales inicializadas automáticamente al arrancar. |
+- `backend/src/bootstrap/server.js` corresponde a la composición de capa 7; registra middleware, estáticos y rutas.
+- Los módulos `identity`, `academic`, `attendance` y `excuses` contienen artefactos de presentación, aplicación, dominio, puertos y persistencia según su avance de migración.
+- `backend/src/controllers.js` conserva lógica heredada. Su extracción progresiva es un pendiente técnico y no debe copiarse en nuevos endpoints.
+- El frontend está en transición hacia `frontend/src/experience` y `frontend/src/shared`; `frontend/app.js` sigue siendo código heredado que debe reducirse gradualmente.
 
-## Flujo de Autenticación
+## Comunicación entre capas
 
-```
-App SPA (Instructor) ── POST /api/auth/login {documento, password} ──> API Express
-                     <── Retorna JWT (24h) + datos del usuario ─────── API Express
+1. La interfaz invoca contratos HTTP publicados por presentación.
+2. Presentación valida forma y delega a aplicación; no contiene SQL ni reglas académicas.
+3. Aplicación coordina un caso de uso, políticas y transacción; accede a datos mediante puertos.
+4. Dominio mantiene las reglas BR sin HTTP, SQL, archivos ni variables de entorno.
+5. Persistencia implementa los puertos y maneja SQL parametrizado.
+6. Infraestructura provee dependencias técnicas y las ensambla en `bootstrap`.
 
-Todas las peticiones a /api/* adjuntan cabecera Authorization: Bearer <JWT>
-```
+## Reglas de protección
 
-## Flujo de Sesión de Asistencia
-
-```
-1. Instructor ── POST /room/create ────────────> Abre sala de 15 minutos en estado activo.
-2. Instructor ── Muestra QR rotativo ───────────> QR apunta a /attendance/{token}. El token rota cada 15s.
-3. Estudiante ── Abre URL y manda check-in ────> POST /public/attendance/{token}/register con clave.
-4. Backend    ── Valida subred IP y horario ───> Modifica tabla de asistencias asignando horas (6h a 0h).
-5. Instructor ── Polling cada 5 segundos ───────> GET /api/sessions/{id}/present para actualizar la grilla.
-6. Instructor ── POST /api/sessions/{id}/close ──> Cierra la sesión permanentemente.
-```
-
-## Restricciones y Decisiones de Diseño
-
-- **Monolito de despliegue simple:** El frontend y el backend se ejecutan sobre el mismo proceso de Node.js, reduciendo la complejidad del despliegue en plataformas en la nube (ej. Vercel).
-- **Base de Datos Conmutable:** Permite desarrollo local ágil sin instalar motores de base de datos pesados (SQLite) y despliegue robusto en producción (PostgreSQL) usando la misma interfaz de consulta simple en `db.js`.
-- **Desacoplamiento de Estilos:** Se utiliza Tailwind CSS cargado por CDN para dar un aspecto estético premium (oscuro con tonos verdes SENA) de manera ligera sin requerir herramientas de empaquetado complejas en desarrollo.
+- Toda ruta protegida requiere autenticación, rol autorizado y comprobación de recurso.
+- Las mutaciones críticas deben ser transaccionales y generar trazabilidad.
+- Las consultas SQL sólo residen en capa 6.
+- El dominio se prueba sin servidor ni base de datos.
+- El código nuevo debe entrar por la capa apropiada, no ampliar el controlador heredado.
