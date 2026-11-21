@@ -5,6 +5,12 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import { resolveJwtSecret } from './shared/infrastructure/config.js';
 import { assertSessionAccess, AuthorizationError } from './modules/identity/application/policies.js';
+import { resolveValidationMode, DomainValidationError } from './modules/attendance/domain/validationMode.js';
+import { calculateAttendanceBlocks as calculateAttendanceBlocksDomain } from './modules/attendance/domain/punctuality.js';
+import { QR_WINDOW_MS, getAllowedQrOffsetsMs, matchToken as matchTokenDomain } from './modules/attendance/domain/qrRotation.js';
+import { parseDataUrlOrBase64, validateEvidencePayload } from './modules/attendance/domain/evidenceValidation.js';
+import { isWithinBusinessDaysPure } from './modules/excuses/domain/businessDays.js';
+import { computeHmacQrToken, decodeBase64ToBytes, computeSha256Hex } from './shared/infrastructure/hmac.js';
 
 const JWT_SECRET = resolveJwtSecret();
 
@@ -53,27 +59,16 @@ const getClientIp = (req) => {
   return req.socket?.remoteAddress || req.ip || '127.0.0.1';
 };
 
-// QR Token generator based on 60-second blocks
-const QR_BLOCK_MS = 60000; // 1 minute per QR token
-export const generateQrToken = (sessionId, timeOffset = 0) => {
-  const blockIndex = Math.floor((Date.now() + timeOffset) / QR_BLOCK_MS);
-  return crypto
-    .createHmac('sha256', 'qr-rotation-salt')
-    .update(`${sessionId}_${blockIndex}`)
-    .digest('hex')
-    .substring(0, 12);
+// QR Token generator based on BR-03 / ADR-002 (15-second blocks + 1 leeway slot)
+export const generateQrToken = (sessionId, timeOffset = 0, nowMs = Date.now()) => {
+  return computeHmacQrToken(sessionId, { nowMs, timeOffsetMs: timeOffset });
 };
 
 // Match input token dynamically (full 12-char QR token or 6-char manual code)
-export const matchToken = (inputToken, actualToken) => {
-  if (!inputToken || !actualToken) return false;
-  const cleanInput = String(inputToken).trim();
-  const cleanActual = String(actualToken).trim();
-  if (cleanInput.length === 6) {
-    return cleanActual.substring(0, 6).toUpperCase() === cleanInput.toUpperCase();
-  }
-  return cleanActual.toLowerCase() === cleanInput.toLowerCase();
-};
+export const matchToken = matchTokenDomain;
+
+// Re-export pure domain punctuality formula (BR-02)
+export { calculateAttendanceBlocksDomain as calculateAttendanceBlocksPure };
 
 // Check if two IPs are on the same subnet or sharing NAT
 const checkSameSubnetOrIp = (ip1, ip2) => {
@@ -222,28 +217,17 @@ export const createRoom = async (req, res) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'institutionId y unitId son requeridos.' } });
     }
 
-    const isIpActive = ipCheckEnabled !== false && ipCheckEnabled !== 0 && ipCheckEnabled !== '0';
-    const isQrActive = qrEnabled !== false && qrEnabled !== 0 && qrEnabled !== '0';
-
-    if (!isIpActive && !isQrActive) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_VALIDATION_MODE',
-          message: 'Regla de negocio BR-05: Al menos un método de validación (QR o IP) debe estar activo para crear la sala.'
-        }
-      });
+    let resolvedMode;
+    try {
+      resolvedMode = resolveValidationMode({ validationMode, ipCheckEnabled, qrEnabled });
+    } catch (err) {
+      if (err instanceof DomainValidationError) {
+        return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+      }
+      throw err;
     }
-
-    let finalMode = 'IP_AND_QR';
-    if (validationMode && ['IP_AND_QR', 'QR_ONLY', 'IP_ONLY'].includes(validationMode)) {
-      finalMode = validationMode;
-    } else if (isIpActive && isQrActive) {
-      finalMode = 'IP_AND_QR';
-    } else if (isQrActive) {
-      finalMode = 'QR_ONLY';
-    } else {
-      finalMode = 'IP_ONLY';
-    }
+    const isIpActive = resolvedMode.ipCheckEnabled;
+    const finalMode = resolvedMode.validationMode;
 
     // Check if unit belongs to institution and contains people
     const unit = await get('SELECT * FROM academic_units WHERE id = ? AND institution_id = ?', [unitId, institutionId]);
@@ -474,12 +458,13 @@ export const checkDocument = async (req, res) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Documento válido y token QR son requeridos.' } });
     }
 
-    // Find session
+    // Find session (BR-03: 15s window + 1 leeway slot)
     let session = null;
     const activeSessions = await query("SELECT * FROM attendance_sessions WHERE LOWER(status) IN ('active', 'open')");
+    const allowedOffsets = getAllowedQrOffsetsMs();
     for (const s of activeSessions) {
-      for (let i = -1; i <= 10; i++) {
-        const tok = generateQrToken(s.id, -i * 60000);
+      for (const offset of allowedOffsets) {
+        const tok = generateQrToken(s.id, offset);
         if (matchToken(token, tok) || (s.qr_token && matchToken(token, s.qr_token))) { session = s; break; }
       }
       if (session) break;
@@ -528,11 +513,11 @@ export const checkin = async (req, res) => {
     if (bodySessionId) {
       session = await get('SELECT * FROM attendance_sessions WHERE id = ?', [bodySessionId]);
     } else {
-      // Find session by matching rotating token (with 10-minute leeway = 10 blocks of 60s)
+      // Find session by matching rotating token (BR-03: 15s window + 1 leeway slot)
       const activeSessions = await query("SELECT * FROM attendance_sessions WHERE LOWER(status) IN ('active', 'open')");
+      const allowedOffsets = getAllowedQrOffsetsMs();
       for (const s of activeSessions) {
-        for (let i = -1; i <= 10; i++) {
-          const offset = -i * 60000;
+        for (const offset of allowedOffsets) {
           const tok = generateQrToken(s.id, offset);
           if (matchToken(token, tok) || (s.qr_token && matchToken(token, s.qr_token))) {
             session = s;
@@ -1286,12 +1271,13 @@ export const selfRegisterCheckin = async (req, res) => {
       return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Documento válido y nombre son requeridos.' } });
     }
 
-    // Find session by token (with 10-minute leeway = 10 blocks of 60s)
+    // Find session by token (BR-03: 15s window + 1 leeway slot)
     let session = null;
     const activeSessions = await query("SELECT * FROM attendance_sessions WHERE LOWER(status) IN ('active', 'open')");
+    const allowedOffsets = getAllowedQrOffsetsMs();
     for (const s of activeSessions) {
-      for (let i = -1; i <= 10; i++) {
-        const tok = generateQrToken(s.id, -i * 60000);
+      for (const offset of allowedOffsets) {
+        const tok = generateQrToken(s.id, offset);
         if (matchToken(token, tok) || (s.qr_token && matchToken(token, s.qr_token))) { session = s; break; }
       }
       if (session) break;
@@ -2186,32 +2172,28 @@ export const submitSessionEvidence = async (req, res) => {
 
     const now = new Date();
 
-    // If file_name and file_data are provided, validate and persist file
+    // If file_name and file_data are provided, validate strictly (canonical Base64, MIME, size, magic bytes)
     if (file_data) {
       const cleanFileName = sanitizeText(file_name || 'reporte_evidencia.xlsx', 120);
-      const ext = path.extname(cleanFileName).toLowerCase();
-      if (!['.xlsx', '.xls', '.pdf'].includes(ext)) {
-        return res.status(400).json({ error: { code: 'INVALID_FILE_TYPE', message: 'Solo se permiten archivos con formato .xlsx, .xls o .pdf.' } });
+      let validated;
+      let bytes;
+      try {
+        const parsed = parseDataUrlOrBase64(file_data);
+        bytes = decodeBase64ToBytes(parsed.base64);
+        validated = validateEvidencePayload({
+          fileName: cleanFileName,
+          rawFileData: file_data,
+          decodedBytes: bytes,
+          declaredMimeOverride: req.body.mimeType || req.body.mime_type
+        });
+      } catch (err) {
+        if (err instanceof DomainValidationError) {
+          return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+        }
+        throw err;
       }
 
-      let base64Content = file_data;
-      let mimeType = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      if (file_data.includes(',')) {
-        const parts = file_data.split(',');
-        const matchMime = parts[0].match(/:(.*?);/);
-        if (matchMime) mimeType = matchMime[1];
-        base64Content = parts[1];
-      }
-
-      const buffer = Buffer.from(base64Content, 'base64');
-      if (buffer.length === 0) {
-        return res.status(400).json({ error: { code: 'EMPTY_FILE', message: 'El archivo adjunto está vacío.' } });
-      }
-      if (buffer.length > 10 * 1024 * 1024) {
-        return res.status(400).json({ error: { code: 'FILE_TOO_LARGE', message: 'El archivo excede el tamaño máximo permitido de 10 MB.' } });
-      }
-
-      const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+      const hash = computeSha256Hex(bytes);
 
       await run(`
         UPDATE attendance_sessions
@@ -2223,7 +2205,7 @@ export const submitSessionEvidence = async (req, res) => {
             evidence_file_size = ?,
             evidence_hash = ?
         WHERE id = ?
-      `, [now.toISOString(), cleanFileName, file_data, mimeType, buffer.length, hash, sessionId]);
+      `, [now.toISOString(), cleanFileName, file_data, validated.mimeType, validated.sizeBytes, hash, sessionId]);
 
       await createAuditLog(
         req.user?.id || 'INSTRUCTOR',
@@ -2231,7 +2213,7 @@ export const submitSessionEvidence = async (req, res) => {
         'session',
         sessionId,
         { evidence_submitted: session.evidence_submitted },
-        { evidence_submitted: 1, evidence_file_name: cleanFileName, evidence_file_size: buffer.length, hash }
+        { evidence_submitted: 1, evidence_file_name: cleanFileName, evidence_file_size: validated.sizeBytes, hash }
       );
     } else {
       await run(`
@@ -2288,16 +2270,27 @@ export const downloadSessionEvidence = async (req, res) => {
       return res.status(404).json({ error: { code: 'NO_EVIDENCE_ATTACHED', message: 'No hay archivo de evidencia adjunto para esta sesión.' } });
     }
 
-    let base64Content = session.evidence_file_data;
-    if (base64Content.includes(',')) {
-      base64Content = base64Content.split(',')[1];
+    const fileName = session.evidence_file_name || `evidencia_${sessionId}.xlsx`;
+    let validated;
+    let bytes;
+    try {
+      const parsed = parseDataUrlOrBase64(session.evidence_file_data);
+      bytes = decodeBase64ToBytes(parsed.base64);
+      validated = validateEvidencePayload({
+        fileName,
+        rawFileData: session.evidence_file_data,
+        decodedBytes: bytes,
+        declaredMimeOverride: session.evidence_mime_type
+      });
+    } catch (err) {
+      if (err instanceof DomainValidationError) {
+        return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+      }
+      throw err;
     }
 
-    const buffer = Buffer.from(base64Content, 'base64');
-    const fileName = session.evidence_file_name || `evidencia_${sessionId}.xlsx`;
-    const mimeType = session.evidence_mime_type || 'application/octet-stream';
-
-    res.setHeader('Content-Type', mimeType);
+    const buffer = Buffer.from(bytes);
+    res.setHeader('Content-Type', validated.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
     res.setHeader('Content-Length', buffer.length);
     return res.send(buffer);
@@ -2416,58 +2409,7 @@ export const acceptStudentTerms = async (req, res) => {
   }
 };
 
-// Get pending biometrics requests for instructor verification
-export const getPendingBiometrics = async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const rows = await query(`
-      SELECT r.id as record_id, r.session_id, r.documento, r.photo_evidence, r.biometric_match_score, r.horas_inasistencia_acumulada, r.created_at, p.nombre, p.photo_reference
-      FROM attendance_records r
-      JOIN people p ON r.person_id = p.id
-      WHERE r.session_id = ? AND r.status = 'pending_biometric'
-    `, [sessionId]);
-    res.json({ data: rows });
-  } catch (err) {
-    res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
-  }
-};
-
-// Approve or Reject a biometric exception request
-export const resolveBiometricException = async (req, res) => {
-  try {
-    const { recordId } = req.params;
-    const { status } = req.body; // 'approved' or 'rejected'
-
-    if (!status || !['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: "El estado debe ser 'approved' o 'rejected'." } });
-    }
-
-    const record = await get('SELECT * FROM attendance_records WHERE id = ?', [recordId]);
-    if (!record) {
-      return res.status(404).json({ error: { code: 'RECORD_NOT_FOUND', message: 'Registro de asistencia no encontrado.' } });
-    }
-
-    if (status === 'approved') {
-      // Determine final status based on accumulated late hours calculated during checkin
-      const finalStatus = record.horas_inasistencia_acumulada > 0 ? 'ASISTENCIA_PARCIAL' : 'accepted';
-      await run(`
-        UPDATE attendance_records
-        SET status = ?, message = 'Asistencia aprobada manualmente por el docente (Excepción biométrica).'
-        WHERE id = ?
-      `, [finalStatus, recordId]);
-    } else {
-      await run(`
-        UPDATE attendance_records
-        SET status = 'rejected', reject_reason = 'BIOMETRIC_REJECTED', message = 'Rechazado por verificación biométrica visual del docente.'
-        WHERE id = ?
-      `, [recordId]);
-    }
-
-    res.json({ data: { success: true, message: `Excepción biométrica ${status === 'approved' ? 'aprobada' : 'rechazada'} con éxito.` } });
-  } catch (err) {
-    res.status(500).json({ error: { code: 'SERVER_ERROR', message: err.message } });
-  }
-};
+// Biometric exception handlers removed per ADR-003 (anti-overengineering facial AI).
 
 // ── FASE 1: PUBLIC FICHAS & STUDENT REGISTRATION ─────────────────────────────
 
