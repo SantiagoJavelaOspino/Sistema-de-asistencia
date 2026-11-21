@@ -2,7 +2,7 @@
 
 ## Decisión arquitectónica
 
-El Sistema de Asistencia SENA se construye con una **arquitectura de 7 capas (N = 7)**. Es una decisión de diseño interno: cada responsabilidad se ubica en una capa y las dependencias sólo avanzan hacia las capas internas. La arquitectura no se define por un marco de gobernanza ni por una estrategia de partición en servicios.
+El Sistema de Asistencia SENA se construye con una **arquitectura de 7 capas (N = 7)**. Es una decisión de diseño interno: cada responsabilidad se ubica en una capa y las dependencias sólo avanzan hacia las capas internas. La arquitectura no se define por procesos administrativos ni por una estrategia de partición en servicios.
 
 La aplicación conserva una API, una interfaz web y una base de datos relacional por razones operativas actuales. Esa topología no sustituye ni nombra la arquitectura: la referencia técnica del proyecto es exclusivamente la separación por capas descrita aquí.
 

@@ -18,8 +18,8 @@ serves, where its boundaries lie, and defines the canonical Ubiquitous Language.
 The system operates across three primary contexts:
 1. **Attendance Core:** Real-time QR rotation, delay calculation, and presence validation.
 2. **Academic & Identity:** Fichas, apprentice enrollments, instructor assignments, and auth.
-3. **Justifications & Governance:** 3-business-day excuse filing, dual-approval, and audit trails.
+3. **Justifications & Academic Control:** 3-business-day excuse filing, dual approval, and audit trails.
 
 ---
 
-**Related:** [`00-governance/README.md`](../00-governance/README.md) · [`overview.md`](./overview.md)
+**Related:** [`00-team-practices/README.md`](../00-team-practices/README.md) · [`overview.md`](./overview.md)

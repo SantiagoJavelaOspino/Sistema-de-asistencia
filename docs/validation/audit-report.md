@@ -16,7 +16,7 @@ y aprobar una excusa. La recuperación de contraseña entrega el secreto de rese
 | Identity/Auth | 45% | Rojo | JWT/bcrypt existen; reset y secreto por defecto bloquean producción. |
 | Sessions/Attendance | 55% | Rojo | Flujo y cálculo existen; RBAC, QR y validación divergen del SDD. |
 | Excuses | 60% | Rojo | Plazo, unicidad y restauración pasan; cualquiera puede resolver. |
-| Governance | 65% | Amarillo | Cuatro ojos y auditoría están probados; el borde HTTP es débil. |
+| Control académico | 65% | Amarillo | Cuatro ojos y auditoría están probados; el borde HTTP es débil. |
 | Reporting/Evidences | 55% | Rojo | Exportación existe; evidencia no valida el contenido real. |
 | Frontend/UX | 55% | Amarillo | Navegable, pero login duplicado, credenciales visibles y XSS potencial. |
 | Quality/DevOps | 30% | Rojo | Seis suites locales; sin cobertura, carga, E2E ni CI de PR. |
@@ -105,7 +105,7 @@ prueba con reloj fijo acepta sólo la ventana actual/anterior.
 
 ### Modularización
 
-Crear backend/src/modules/{sessions,attendance,excuses,governance,reporting}/ con
+Crear backend/src/modules/{sessions,attendance,excuses,academic,reporting}/ con
 routes.js, service.js, repository.js y policy.js; db.js queda como adaptador. Migrar
 primero funciones puras y sesiones, luego asistencia/excusas y gobierno/reportes;
 server.js importa routers. Crear frontend/modules con los mismos dominios y dejar
@@ -147,7 +147,7 @@ La propuesta UX específica está en docs/ui-ux/login-redesign-proposal.md.
 
 > La evidencia inicial superior se conserva intacta como línea base histórica. El detalle completo de la auditoría de cierre, evidencias de ejecución y estado final por hallazgo se encuentra en [`docs/validation/re-audit-report.md`](./re-audit-report.md).
 
-- **`npm test` (10 suites integradas):** PASS (`health`, `token-rotation`, `punctuality-hours`, `domain-rules`, `architecture-layers`, `frontend-experience`, `invariants-governance`, `e2e-discovery`, `instructor-assignments`, `audit-verification`).
+- **`npm test` (10 suites integradas):** PASS (`health`, `token-rotation`, `punctuality-hours`, `domain-rules`, `architecture-layers`, `frontend-experience`, `business-invariants`, `e2e-discovery`, `instructor-assignments`, `audit-verification`).
 - **`node backend/tests/audit-verification.test.js`:** **19/19 PASS** (0 hallazgos reproducibles; los 8 controles fallidos de la línea base fueron corregidos).
 - **`node backend/tests/concurrency-benchmark.test.js`:** **60 solicitudes concurrentes -> p95 = 99.70 ms** (umbral NFR-01 `< 300 ms` cumplido).
 - **Decisión de liberación actualizada:** **APROBADO PARA DEMO INSTITUCIONAL; CONDICIONADO PARA PRODUCCIÓN** a ejecutar el job PostgreSQL 16 en GitHub Actions (`.github/workflows/ci.yml`), configurar `JWT_SECRET` fuerte (>= 32 bytes) y ejecutar E2E Chromium/axe.

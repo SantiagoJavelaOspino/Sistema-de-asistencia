@@ -11,7 +11,7 @@ check-in mechanism, automatic fractional hours calculation, and audit-ready repo
 | Fast presence check-in | Rotating HMAC QR code + 6-char fallback manual code (< 1 min per apprentice) |
 | Fractional hours calculation | Automatically computes attended hours (6h to 0h) based on exact delay |
 | Excuse filing module | Apprentice excuse submission restricted to 3 business days in America/Bogota |
-| Coordinator governance | Two-person rule (dual approval) for sensitive ficha deletions and audit trail |
+| Control académico | Regla de dos revisores para eliminaciones sensibles de fichas y traza de auditoría |
 | Reporting | One-click Excel (.xlsx) export and official PDF attendance sheets |
 
 ## Who it is for

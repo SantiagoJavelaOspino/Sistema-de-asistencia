@@ -4,7 +4,7 @@
 **Programa de Formación:** Análisis y Desarrollo de Software (ADSO) — Ficha: `3413974`  
 **Institución:** Centro de Formación SENA  
 **Fecha:** Agosto 2026  
-**Versión:** 1.0.0 (Alineado con Gobernanza y ADRs)  
+**Versión:** 1.0.0 (Alineado con prácticas de equipo y ADRs)
 
 ---
 

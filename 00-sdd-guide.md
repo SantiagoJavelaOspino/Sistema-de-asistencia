@@ -19,11 +19,11 @@ SDD:          Documentation  ->  Code  ->  Living Documentation
 
 ## Lifecycle Phases (00 to 06)
 
-The project documentation lifecycle covers governance, discovery, and definition:
+The project documentation lifecycle covers team practices, discovery, and definition:
 
 ```mermaid
 flowchart TD
-    P0["PHASE 0: GOVERNANCE<br/>00-governance<br/>Team charter, DoD, DoR, doc rules"]
+    P0["PHASE 0: TEAM PRACTICES<br/>00-team-practices<br/>Team charter, DoD, DoR, doc rules"]
     P1["PHASE 1: DISCOVERY<br/>01-context -> 02-domain -> 03-product<br/>System boundary, entities, vision"]
     P2["PHASE 2: DEFINITION<br/>04-requirements -> 05-architecture -> 06-data<br/>Functional rules, 7 layers, schema"]
 
@@ -34,7 +34,7 @@ flowchart TD
 
 | Order | Path | Core Question Answered |
 |---|---|---|
-| 1 | [`00-governance/`](00-governance/README.md) | How does the team work, agree, and secure the codebase? |
+| 1 | [`00-team-practices/`](00-team-practices/README.md) | How does the team work, agree, and secure the codebase? |
 | 2 | [`01-context/`](01-context/README.md) | What are the boundaries, stakeholders, and vocabulary? |
 | 3 | [`02-domain/`](02-domain/README.md) | What are the business entities, rules, and invariants? |
 | 4 | [`03-product/`](03-product/README.md) | What is the product vision, problem framing, and roadmap? |
@@ -44,7 +44,7 @@ flowchart TD
 
 ## Documentation Enforcement
 
-All files across folders `00-governance/` through `06-data/` strictly follow:
+All files across folders `00-team-practices/` through `06-data/` strictly follow:
 - **Line Count:** Between 25 and 80 lines per markdown document.
 - **No Instruction Markers:** Zero unresolved placeholder blocks.
 - **Verification:** Automated linter validation via test runner.

@@ -16,7 +16,7 @@ This document defines the canonical Ubiquitous Language for the attendance domai
 | Filing (Radicación) | Submission of an excuse before the 3-business-day statutory deadline | Upload, post |
 | Requesting Coordinator | Coordinator who initiates a sensitive action requiring dual authorization | Creator |
 | Approving Coordinator | Distinct second coordinator who validates and executes the action | Admin, reviewer |
-| Four-Eyes Principle | Governance rule requiring two distinct coordinators to approve critical deletions | Dual control |
+| Four-Eyes Principle | Regla de control académico que exige dos coordinadores distintos para aprobar eliminaciones críticas | Dual control |
 | Deactivation | Soft operational suspension that preserves historical data and audit trails | Archive |
 | Deletion | Formal removal of an entity executed only after Four-Eyes approval | Hard delete |
 | Suppression | Personal data erasure complying with Habeas Data Law 1581 | Account wipe |

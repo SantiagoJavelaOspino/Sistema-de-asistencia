@@ -539,7 +539,7 @@ export async function initDb() {
     console.error('Migration error (non-fatal) Phase v3:', migv3Err.message);
   }
 
-  // Migration Phase v4: Governance, Holidays, Validation Modes & Audit
+  // Migration Phase v4: Control académico, festivos, modos de validación y auditoría
   try {
     if (isPostgres) {
       try { await run(`ALTER TABLE academic_units ADD COLUMN status TEXT DEFAULT 'ACTIVE'`); } catch (e) { if (e.code !== '42701') throw e; }

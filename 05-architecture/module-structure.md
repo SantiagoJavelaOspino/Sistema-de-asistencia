@@ -15,7 +15,7 @@ sena-attendance-system/
 │       ├── health.test.js             # Probe endpoints
 │       ├── token-rotation.test.js     # HMAC QR determinism & leeway
 │       ├── punctuality-hours.test.js  # H(delay) attendance formula
-│       └── invariants-governance.test.js # BR-01 to BR-12 invariants
+│       └── business-invariants.test.js # BR-01 to BR-12 invariants
 ├── frontend/
 │   ├── index.html             # Single Page Application layout
 │   ├── app.js                 # SPA logic, state management, UI rendering

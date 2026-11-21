@@ -2,7 +2,7 @@
 
 **ID:** US-[Number]  
 **Title:** [Feature title in imperative]  
-**Module:** [`identity` / `academic` / `sessions` / `attendance` / `excuses` / `reporting` / `governance`]  
+**Module:** [`identity` / `academic` / `sessions` / `attendance` / `excuses` / `reporting`]
 
 ## Description
 

@@ -13,8 +13,8 @@
 | `excuses` | `excuses` | `id` (PK), `session_id`, `person_id`, `text`, `file_name`, `status` |
 | `late_requests` | `attendance` | `id` (PK), `session_id`, `documento`, `justification`, `status` |
 | `holidays` | `excuses` | `date` (PK), `name`, `active` |
-| `deletion_requests` | `governance` | `id` (PK), `entity_type`, `entity_id`, `requested_by`, `approved_by`, `status` |
-| `audit_logs` | `governance` | `id` (PK), `actor_id`, `action`, `entity_type`, `entity_id`, `created_at` |
+| `deletion_requests` | `academic` | `id` (PK), `entity_type`, `entity_id`, `requested_by`, `approved_by`, `status` |
+| `audit_logs` | `academic` | `id` (PK), `actor_id`, `action`, `entity_type`, `entity_id`, `created_at` |
 
 ## Indices
 

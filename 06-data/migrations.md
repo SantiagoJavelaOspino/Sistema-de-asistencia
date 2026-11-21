@@ -12,7 +12,7 @@ the `initDb` lifecycle hook before the HTTP server binds to the listening port.
 | Phase v1 | Base schema | Institutions, fichas, people, enrollments |
 | Phase v2 | Attendance core | Sessions, attendance records, late requests |
 | Phase v3 | Evidence & security | Evidence flags, creator IP tracking |
-| Phase v4 | Governance & holidays | Holidays table, deletion requests, audit logs, validation modes |
+| Phase v4 | Control académico y festivos | Holidays table, deletion requests, audit logs, validation modes |
 
 ## Idempotency rules
 

@@ -1,5 +1,5 @@
 /**
- * SENA ATTENDANCE SYSTEM - Governance & Business Invariants Test Suite
+ * SENA ATTENDANCE SYSTEM - Business Invariants Test Suite
  * Valida formalmente BR-01 a BR-12 (3 dias habiles, calculo exacto de retardos,
  * regla de 4 ojos sin autoaprobacion y modos de validacion de sala).
  */
@@ -12,8 +12,8 @@ import {
 } from '../src/controllers.js';
 import { run, get } from '../src/db.js';
 
-export async function runGovernanceInvariantTests() {
-  console.log('\n[TEST SUITE] Invariantes de Negocio y Gobernanza (BR-01 a BR-12)');
+export async function runBusinessInvariantTests() {
+  console.log('\n[TEST SUITE] Invariantes de Negocio y Control Académico (BR-01 a BR-12)');
 
   // 1. Invariante BR-07: Calculo estricto de 3 Dias Habiles con Festivos
   const sessionFriday = '2026-02-06T18:00:00-05:00';

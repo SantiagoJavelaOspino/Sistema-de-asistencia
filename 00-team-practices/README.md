@@ -1,9 +1,9 @@
-# 00 — Governance
+# 00 — Prácticas de equipo
 
 ## Purpose
 
-This section establishes the engineering governance and collaboration standards for
-the **SENA Academic Attendance System** (`sena-attendance-system`). It governs how
+This section establishes collaboration standards for
+the **SENA Academic Attendance System** (`sena-attendance-system`). It describes how
 our team plans, branches, reviews, tests, documents, and secures an application
 organized according to the project’s seven-layer architecture.
 

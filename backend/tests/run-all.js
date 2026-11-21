@@ -5,7 +5,7 @@
 import { runHealthTests } from './health.test.js';
 import { runTokenRotationTests } from './token-rotation.test.js';
 import { runPunctualityTests } from './punctuality-hours.test.js';
-import { runGovernanceInvariantTests } from './invariants-governance.test.js';
+import { runBusinessInvariantTests } from './business-invariants.test.js';
 import { runDiscoveryFlowTests } from './e2e-discovery.test.js';
 import { runInstructorAssignmentTests } from './instructor-assignments.test.js';
 import { runDomainUnitTests } from './domain-rules.test.js';
@@ -27,7 +27,7 @@ async function main() {
     await runDomainUnitTests();
     await runArchitectureLayerTests();
     await runFrontendExperienceTests();
-    await runGovernanceInvariantTests();
+    await runBusinessInvariantTests();
     await runDiscoveryFlowTests();
     await runInstructorAssignmentTests();
     await runAuditVerificationTests();

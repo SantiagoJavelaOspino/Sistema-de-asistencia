@@ -4,7 +4,7 @@
  */
 import { assertFourEyesApproval } from '../domain/fourEyes.js';
 
-export function createFichaGovernanceService({ academicRepository }) {
+export function createFichaControlService({ academicRepository }) {
   return {
     async verifyDeletionApproval({ requestId, approverId }) {
       const request = await academicRepository.findDeletionRequestById(requestId);

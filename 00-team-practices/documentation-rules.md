@@ -1,6 +1,6 @@
 # 00 — Documentation Rules
 
-> [!NOTE] GOVERNANCE POLICY
+> [!NOTE] POLÍTICA DE DOCUMENTACIÓN
 > This document defines when a document in this repository is considered done.
 > It establishes the documentation standards and lifecycle for the whole repository.
 

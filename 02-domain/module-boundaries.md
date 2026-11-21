@@ -10,13 +10,13 @@
 | `attendance` | AttendanceRecord | `recordCheckin`, `calculateAttendanceBlocks`, `manualOverride` |
 | `excuses` | Excuse, Holiday | `submitExcuse`, `resolveExcuse`, `isWithinBusinessDays` |
 | `reporting` | *(Read-only views)* | `generateExcelReport`, `generatePdfReport` |
-| `governance` | DeletionRequest, AuditLog | `requestFichaDeletion`, `approveFichaDeletion`, `createAuditLog` |
+| `academic` | DeletionRequest, AuditLog | `requestFichaDeletion`, `approveFichaDeletion`, `createAuditLog` |
 
 ## Inward and outward dependency rules
 
 1. `attendance` queries `sessions` and `academic` to validate room and enrollment state.
 2. `sessions` and `academic` never query or import from `attendance`.
-3. `governance` operates orthogonally: it intercepts administrative actions and audits them.
+3. `academic` applies the two-reviewer rule to sensitive administrative actions and records their audit trail.
 4. Circular dependencies between modules are strictly forbidden by architectural linters.
 5. All inter-module communication occurs via public function contracts, never raw SQL joins.
 

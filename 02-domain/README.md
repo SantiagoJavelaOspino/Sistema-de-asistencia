@@ -17,7 +17,7 @@ contexts, defines domain entities, and establishes the 12 business invariants (B
 
 1. **Deterministic Punctuality Formula:** Exact mathematical piecewise function $H(delay)$.
 2. **Statutory 3-Business-Day Deadline:** Calibrated to `America/Bogota` and official holidays.
-3. **Four-Eyes Governance:** Concurrency-safe, non-self-approvable dual authorization.
+3. **Four-Eyes Control:** Concurrency-safe, non-self-approvable dual authorization.
 4. **Anti-Fraud Protections:** Dynamic HMAC QR codes with network latency tolerance.
 
 ## Review gate criteria
