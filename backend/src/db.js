@@ -2,6 +2,7 @@ import pg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
+import { convertPlaceholdersToPg } from './shared/infrastructure/sqlDialect.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isPostgres = !!process.env.DATABASE_URL;
@@ -40,11 +41,49 @@ if (isPostgres) {
   }
 }
 
-// ── Placeholder converter: SQLite ? → PostgreSQL $1, $2, ... ─────────────────
+// ── Placeholder converter: SQLite ? → PostgreSQL $1, $2, ... (quote-safe) ────
 function toPg(sql) {
-  let i = 0;
-  return sql.replace(/\?/g, () => `$${++i}`);
+  return convertPlaceholdersToPg(sql);
 }
+
+/**
+ * Ejecuta un bloque de operaciones dentro de una transacción atómica (SQLite y PostgreSQL).
+ */
+export const withTransaction = async (fn) => {
+  if (isPostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tx = {
+        query: async (sql, params = []) => (await client.query(toPg(sql), params)).rows,
+        get: async (sql, params = []) => (await client.query(toPg(sql), params)).rows[0] || null,
+        run: async (sql, params = []) => {
+          const r = await client.query(toPg(sql), params);
+          return { id: null, changes: r.rowCount };
+        }
+      };
+      const result = await fn(tx);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    await run('BEGIN TRANSACTION');
+    try {
+      const tx = { query, get, run };
+      const result = await fn(tx);
+      await run('COMMIT');
+      return result;
+    } catch (err) {
+      await run('ROLLBACK');
+      throw err;
+    }
+  }
+};
 
 // ── Query helpers (same API as the old sqlite3 wrappers) ──────────────────────
 
