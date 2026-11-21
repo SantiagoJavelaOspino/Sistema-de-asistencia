@@ -1,0 +1,73 @@
+name: CI — Quality, Security & Portability
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-sqlite-and-security:
+    name: SQLite, 7-Layer Boundaries & Concurrency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check conflict markers
+        run: |
+          if grep -rnE '^(<<<<<<<|=======|>>>>>>>)' docs/ backend/ frontend/; then
+            echo "Merge conflict markers found!"
+            exit 1
+          fi
+      - name: Install dependencies
+        run: npm run install:all
+      - name: Run full test suite (SQLite)
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-sqlite-strong-secret-key-at-least-32-bytes-long
+        run: npm test
+      - name: Run standalone audit verification
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-sqlite-strong-secret-key-at-least-32-bytes-long
+        run: node backend/tests/audit-verification.test.js
+      - name: Run NFR-01 concurrency benchmark (>= 50 concurrent)
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-sqlite-strong-secret-key-at-least-32-bytes-long
+        run: node backend/tests/concurrency-benchmark.test.js
+      - name: Audit npm dependencies
+        run: npm --prefix backend audit --audit-level=high || true
+
+  test-postgresql-portability:
+    name: PostgreSQL Compatibility (NFR-07)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+          POSTGRES_DB: sena_attendance_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm run install:all
+      - name: Run full test suite against PostgreSQL
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:postgres_ci_password@localhost:5432/sena_attendance_test
+          JWT_SECRET: ci-postgres-strong-secret-key-at-least-32-bytes-long
+        run: npm test

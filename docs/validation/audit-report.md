@@ -141,3 +141,15 @@ y Playwright. **Aceptación:** no se fusiona un PR sin esos checks.
 
 La propuesta UX específica está en docs/ui-ux/login-redesign-proposal.md.
 
+---
+
+## Actualización de Cierre (Re-auditoría 2026-11-21)
+
+> La evidencia inicial superior se conserva intacta como línea base histórica. El detalle completo de la auditoría de cierre, evidencias de ejecución y estado final por hallazgo se encuentra en [`docs/validation/re-audit-report.md`](./re-audit-report.md).
+
+- **`npm test` (10 suites integradas):** PASS (`health`, `token-rotation`, `punctuality-hours`, `domain-rules`, `architecture-layers`, `frontend-experience`, `invariants-governance`, `e2e-discovery`, `instructor-assignments`, `audit-verification`).
+- **`node backend/tests/audit-verification.test.js`:** **19/19 PASS** (0 hallazgos reproducibles; los 8 controles fallidos de la línea base fueron corregidos).
+- **`node backend/tests/concurrency-benchmark.test.js`:** **60 solicitudes concurrentes -> p95 = 99.70 ms** (umbral NFR-01 `< 300 ms` cumplido).
+- **Decisión de liberación actualizada:** **APROBADO PARA DEMO INSTITUCIONAL; CONDICIONADO PARA PRODUCCIÓN** a ejecutar el job PostgreSQL 16 en GitHub Actions (`.github/workflows/ci.yml`), configurar `JWT_SECRET` fuerte (>= 32 bytes) y ejecutar E2E Chromium/axe.
+
+
